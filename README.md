@@ -1,0 +1,305 @@
+# Werewolf Moderator
+
+A phone-friendly, self-hosted digital moderator for the party game **Werewolf**
+(a.k.a. Mafia) — built for playing **online, from separate homes**, with no
+one sitting out as "the host." Someone starts a lobby, everyone else joins
+from their own phone or laptop browser, and the app runs the whole game:
+role assignment, night phases, a live in-app sheriff campaign, speech order,
+day voting, and a full recap at the end.
+
+It has **zero dependencies** — just plain Node.js, nothing to `npm install`.
+That was a deliberate choice to make it as painless as possible to deploy
+without a real dev environment.
+
+## No host — everyone is a player
+
+There is no separate "moderator" screen and no one who can see more than
+they should. Whoever starts the lobby is just the **lobby leader**: they get
+a couple of extra pre-game controls (configuring roles, timers, and win
+condition, starting the game, removing a player who dropped out), but their
+game screen shows exactly what anyone else's does. No client — leader or
+not — ever sees another player's role, another player's private night
+action, or the game log before it's been announced to everyone. If you
+wanted an "invisible" screen to watch everything, that's gone on purpose —
+it's not something the game needs anymore.
+
+## Wolves know their pack
+
+The one deliberate exception to "no one sees more than they should": every
+Werewolf (and the Werewolf King) can see who their fellow wolves are, for
+the entire game — not just during their shared night kill vote — same as
+in the physical game, where the wolves quietly know each other from the
+start. On a wolf's screen, teammates are marked with a small 🐺 next to
+their name in the seating order list that's always on screen; no other
+player ever sees that marker, on anyone.
+
+## Playing online — quick rundown
+
+1. One person opens the app, taps **Create a Game**, and enters their name.
+   They get a 4-letter room code and become the lobby leader.
+2. Everyone else opens the same link (or the app + the code) and taps
+   **Join a Game**, entering their own name.
+3. The leader sets how many of each role to use (must equal the number of
+   players who've joined), picks a win condition, and can tune every timer
+   (see **Timers** below) — then taps **Start Game**.
+4. Every player reveals their own role privately. Night 1 resolves in the
+   background — nothing is announced yet.
+5. Day 1 opens directly into the **Sheriff campaign** (see below), before
+   anyone learns what happened overnight. Once that concludes, the night's
+   events are announced (deaths only — never *how* anyone died) and normal
+   day discussion begins, following the seating order's speech rules.
+6. After discussion, a short countdown leads into the elimination vote.
+   Repeat night → campaign-only-on-day-1 → discussion → vote until someone
+   wins, then everyone sees the full recap.
+
+Nobody has to remember rules, enforce turn order, or keep a game log —
+the app does all of it, and does it the same way for every player.
+
+## The Sheriff campaign ("day 0")
+
+Before anything about the night is revealed — before deaths, before
+anyone even learns whether *they themselves* are still alive — Day 1 opens
+into a live campaign round:
+
+1. **Nominate** — any player can tap to run for Sheriff during a short
+   window (the `candidacy` timer).
+2. **Speeches** — if two or more players are running, each candidate gets
+   a turn to make their case (the `speech` timer per turn). With zero or
+   one candidate, this step is skipped.
+3. **Vote** — everyone votes for a candidate (the `electionVote` timer).
+   Highest vote count wins the badge; ties broken at random.
+
+This round is deliberately separate from the rest of the day — it's
+sometimes called "day 0." Since no one's death has been announced yet, a
+secretly-dead player can fully run, give a speech, vote, and even win the
+badge, without anyone (including themselves, on their own screen) knowing
+they didn't survive the night. That's not a bug — it's real information for
+the table: winning the badge and then immediately turning out to be dead
+says something. It also gives villagers with no night power something
+concrete to do and read into on day 1.
+
+The instant the campaign ends, the night is revealed. If the newly-elected
+Sheriff turns out to be dead, *they* (not anyone else) are immediately
+prompted to pass the badge to someone else or retire it, before discussion
+starts.
+
+## Speech order
+
+Once the night is revealed, the day's discussion follows the seating
+circle (a random seat order fixed once at game start) in one of these
+ways:
+
+- **Exactly one player died** last night: whoever sits next to the
+  deceased starts. If there's a Sheriff, the Sheriff chooses which side —
+  left or right — starts (which also sets the direction the rest of the
+  table speaks in). With no Sheriff, the app picks the side at random.
+- **Nobody died, or two or more died**, and there **is** a Sheriff: the
+  Sheriff always speaks last, and chooses which neighbor starts (and thus
+  the direction).
+- **Nobody died, or two or more died**, and there's **no** Sheriff: the
+  app picks a random starting player and a random direction.
+
+The current speaker is highlighted on every player's screen, along with an
+explicit ⬆️/⬇️ arrow (in the roster header and on the "Now speaking" card)
+showing which way the order is walking the seat list — down and wrapping
+from the bottom back to the top, or up and wrapping from the top back to
+the bottom — so no one has to infer direction from watching the highlight
+move. They can tap "I'm done speaking" to pass to the next player
+immediately, or just let their turn run out (the `speech` timer, tunable
+in the lobby) — either way the game advances itself, no manual "force
+advance" anywhere. Once everyone's had a turn, a short fixed 10-second
+countdown leads into voting.
+
+**Knight and Werewolf King** are the one exception: their one-time ability
+can be used **at any point** during this regular discussion — even
+interrupting whoever's currently speaking — since using it can end the
+day's discussion outright and timing it is a real strategic choice. (This
+does *not* apply during the Sheriff campaign, which is a separate, earlier
+round.)
+
+## Nothing waits on a manual override
+
+Every point in the game that used to need a human moderator to step in —
+casting a night action, voting in the campaign or the day vote, deciding
+whether to speak longer — instead has its own **tunable timer**, shown as a
+live countdown on the relevant players' screens. If time runs out, the game
+auto-advances with a sensible default (no vote cast, no ability used, pass
+the turn) so nobody can accidentally hold up the table. There is no "force
+advance" button anywhere, for anyone.
+
+### Timers (all configurable in the lobby before starting)
+
+| Timer | Governs |
+|---|---|
+| `candidacy` | How long the Sheriff-campaign nomination window stays open. |
+| `electionVote` | How long the Sheriff-campaign vote stays open. |
+| `speech` | The max length of a single discussion turn before it auto-passes. |
+| `dayVote` | How long the day's elimination vote stays open (kept separate from — and usually shorter than — the campaign vote, since by then people already have a read on the table). |
+| `nightAction` | Every night sub-phase (Guard, wolves, Seer, Witch in turn), plus the Hunter's revenge shot, a Sheriff handoff, and a Sheriff's speech-order pick. Night actions are **sequenced**, not run on one shared clock — the Witch's window doesn't open, for instance, until the wolves have actually acted, since she needs to see their target first. |
+
+## Night deaths are never explained
+
+The morning announcement only ever says *who* died — never *how*. Figuring
+out whether someone was wolfed, or protected-but-still-gone, or anything
+else, is left entirely to the table to reason about; that ambiguity is part
+of the strategy. The two exceptions are the **Knight's duel** and the
+**Werewolf King's reveal**, which are voluntary, public, self-reveals (not
+hidden night mechanisms) — when either is used, the full outcome is
+announced in detail, including who they were and what happened.
+
+## End-of-game recap
+
+When the game ends, every player sees a full recap: every announcement
+from every day of the game, in order, plus every player's true role and
+final fate. It's a replay of the same story everyone already lived through
+— outcomes only (who died, who was elected, who won a duel, who the
+village voted out), not a play-by-play. It deliberately leaves out routine
+process noise (individual "so-and-so cast their vote" lines) and the
+secret per-night mechanics that were never announced in the first place
+(exactly who the Guard protected, who the Seer looked at, who the Witch
+targeted) — the "night deaths are never explained" rule holds at the
+recap too, just with final roles and the win/loss now attached.
+
+## Roles
+
+| Role | Side | Power |
+|---|---|---|
+| Werewolf | Wolf | Votes with the pack each night to choose a victim. |
+| Werewolf King | Wolf | Votes with the pack like a normal wolf. Once per game, at any point during day discussion (even interrupting the current speaker), may reveal himself and choose a player — both die immediately, publicly and in full detail. |
+| Villager | Village | No power. Plain vote. |
+| Seer | Village (God) | Each night, learns whether one chosen player is Werewolf-team or Village-team. |
+| Witch | Village (God) | Sees the wolves' victim (only while she still holds her heal potion) and has one heal + one poison, each usable once per game. |
+| Hunter | Village (God) | If killed by anything except the Witch's poison, immediately fires back and eliminates one more player. |
+| Fool | Village (God) | Plays like a normal villager. If voted out by the town, does **not** die — instead is revealed to everyone and permanently loses the right to vote. |
+| Guard | Village (God) | Each night, protects one player from the wolves' kill. Can't protect the same player two nights running. |
+| Knight | Village (God) | Once per game, at any point during day discussion (even interrupting the current speaker), may reveal himself and duel another player. If the target is a Werewolf, the wolf dies and the game jumps straight to night — publicly announced in full. If the target is Village-aligned, the Knight dies of shame instead and the day continues normally. |
+
+"God" here just means a special (non-Werewolf, non-plain-Villager) village
+role — it's the label your group already uses; it only affects gameplay
+under the **Extinction** win condition, where wiping out all Gods (or all
+plain Villagers) wins it for the wolves.
+
+Every role except Werewolf and Villager is capped at **1 per game** in the
+lobby's role setup — these are the roles whose one-time abilities and
+night-action state (the Witch's potions, in particular) are only tracked
+once per game, not once per player, so a second copy of any of them isn't
+supported. The config UI won't let you enter more than 1, and the server
+clamps it even if it somehow got past that.
+
+Two selectable **win conditions**, toggled by the lobby leader before
+starting:
+
+- **Majority** (the original rule): Village wins when all wolves are dead;
+  Werewolves win once they equal or outnumber the remaining village.
+- **Extinction** (Chinese werewolf / 屠边 "sweep a side" rules): Werewolves
+  win the instant *either* all Gods are dead *or* all plain Villagers are
+  dead — whichever side gets wiped out first, regardless of headcount.
+  Village still wins whenever all wolves die.
+
+## House-rule choices I made
+
+The game has a lot of table-to-table variation, so I had to pick some
+defaults. All are easy to change — just say so and I'll adjust the code:
+
+- **Tie-breaks** (wolves' kill vote, day elimination vote, and the Sheriff
+  election) are broken by random pick among the tied players, rather than
+  "no kill" or a re-vote.
+- **Reveal role on death** defaults to on (a lobby toggle turns it off if
+  you'd rather keep roles secret until the game ends).
+- The **Witch** can target herself with either potion, and can poison any
+  living player (not just the wolves' victim).
+- **Wolves can vote to kill a fellow wolf** — a real, occasionally-used
+  strategy (throwing suspicion elsewhere, cutting loose a packmate whose
+  play is putting the team at risk). No one — wolf included — can vote for
+  themselves, at night or during the day or Sheriff election.
+- Not voting, not using a night ability, and not ending your speech turn
+  early are all fine — every one of those has its own timer and a defined
+  no-op outcome if time runs out.
+- If the sitting **Sheriff dies**, it's the dying Sheriff themselves — not
+  anyone else — who's prompted (once the death is revealed) to hand the
+  badge to someone else or retire it for the rest of the game.
+- If the **Hunter** dies the same night the wolves *and* the witch's poison
+  both land on him, it counts as a poison death (no revenge shot) — poison
+  always "wins" for this purpose.
+- If the Hunter's revenge shot could change the outcome (e.g. he takes a
+  wolf down with him), the game waits for that shot to resolve before
+  declaring a winner — including when it's the Werewolf King's reveal, or
+  Extinction rules, that would otherwise end the game that instant.
+- The **Guard** may protect themselves, and is only blocked from repeating
+  *last* night's specific target — anyone else, including a target from two
+  or more nights ago, is fair game again.
+- The **Knight**'s duel and the **Werewolf King**'s reveal are usable at any
+  point during regular day discussion (not during the Sheriff campaign, and
+  not once voting has opened). Each is strictly one-time-per-game.
+- A **Fool** who is voted out is marked publicly revealed (their card shows
+  to everyone from then on) and loses their vote for the rest of the game,
+  but stays alive and can still be targeted at night like anyone else. If
+  they were holding the Sheriff badge, the same hand-off prompt used on a
+  Sheriff's death fires immediately — the Fool can no longer vote, so the
+  badge doesn't stay with them by default; they choose who gets it (or let
+  it lapse) exactly like a dying Sheriff would.
+
+## Deploying it (recommended: Render, free, no install needed)
+
+Render's free tier needs no credit card and no command line — everything
+happens through GitHub.com and Render.com in your browser.
+
+**1. Put the project on GitHub (no git required on your computer):**
+   - Go to [github.com](https://github.com) and create a free account if you
+     don't have one.
+   - Click **New repository**, name it something like `werewolf-moderator`,
+     and create it (it can be public or private).
+   - On the empty repo page, click **uploading an existing file** and drag
+     in `server.js`, `package.json`, and `README.md` from this project, then
+     commit.
+   - Then click **Add file → Create new file**, and for the filename type
+     `public/index.html` (typing the `public/` prefix creates that folder
+     automatically). Paste in the contents of this project's
+     `public/index.html`, and commit.
+
+**2. Deploy it on Render:**
+   - Go to [render.com](https://render.com) and sign up free.
+   - Click **New +** → **Web Service**, and connect the GitHub repo you just
+     made.
+   - Render auto-detects Node.js. Leave the build command as-is (or blank —
+     there's nothing to install) and set the start command to `node
+     server.js` if it isn't already.
+   - Click **Create Web Service**. After a minute or two you'll get a public
+     URL like `https://werewolf-moderator.onrender.com` — that's the link
+     everyone opens, from wherever they are.
+
+**Heads up on the free tier:** it spins down after ~15 minutes with no
+traffic, and takes about a minute to wake back up. That only matters
+*between* game nights — while people are actually playing, their browsers
+are polling the app several times a second, so it stays awake for the whole
+game. Just open the link yourself once before everyone joins, so it's
+already warm.
+
+## Running it locally instead
+
+If everyone happens to be on the same WiFi (e.g. one shared house), you can
+skip hosting it entirely:
+
+```
+node server.js
+```
+
+Then find that computer's local IP address (on Mac: System Settings → WiFi
+→ Details; on Windows: `ipconfig`) and have players open
+`http://<that-ip>:3000` on their own device. If the app doesn't load, check
+that the computer's firewall allows incoming connections on port 3000.
+This won't work for players in separate homes — for that, use the Render
+deployment above.
+
+## Limitations to know about
+
+- **Games live in memory only.** If the server restarts (a redeploy, or the
+  free-tier host recycling the process), any game in progress is lost —
+  players would need to rejoin and start over. Fine for a casual game night,
+  not meant for anything you can't afford to redo.
+- Updates are pulled by each browser polling about once a second rather
+  than a live push connection — deliberately simple and dependency-free,
+  and the lag is imperceptible for a turn-based game like this.
+- No accounts or persistence between sessions — closing the tab keeps your
+  spot (there's a reconnect token saved on your device) as long as the game
+  is still running, but there's no history once it ends.

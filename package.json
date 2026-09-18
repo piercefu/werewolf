@@ -1,0 +1,13 @@
+{
+  "name": "werewolf-moderator",
+  "version": "2.0.0",
+  "description": "A self-hosted digital moderator for the game Werewolf, built for online play with no separate host. Everyone joins as a player; the app assigns roles, runs a live sheriff campaign and election, walks the table through night phases and speech order, and runs day voting. No dependencies to install.",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {}
+}

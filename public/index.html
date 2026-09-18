@@ -1,0 +1,1044 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Werewolf Moderator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐺</text></svg>" />
+<style>
+  :root {
+    --bg: #12132a;
+    --bg2: #1b1d3f;
+    --card: #23255a;
+    --card2: #2c2f70;
+    --text: #f1f1fb;
+    --muted: #a8a9d6;
+    --accent: #8b7cff;
+    --accent2: #ff6b6b;
+    --good: #4ade80;
+    --bad: #f87171;
+    --warn: #fbbf24;
+    --border: #3a3d80;
+    --radius: 14px;
+  }
+  body.day {
+    --bg: #2b2416;
+    --bg2: #3a3020;
+    --card: #453824;
+    --card2: #55462c;
+    --accent: #ffb347;
+    --border: #6b5636;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(160deg, var(--bg), var(--bg2));
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+    transition: background 0.6s ease;
+    padding-bottom: 40px;
+  }
+  #app { max-width: 560px; margin: 0 auto; padding: 16px; }
+  h1, h2, h3 { margin: 0 0 8px; font-weight: 700; }
+  h1 { font-size: 1.6rem; }
+  h2 { font-size: 1.25rem; }
+  h3 { font-size: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  p { line-height: 1.45; color: var(--muted); margin: 0 0 12px; }
+  .center { text-align: center; }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .card.tight { padding: 12px; }
+  .hero { padding: 34px 20px; text-align: center; }
+  .hero .moon { font-size: 3.2rem; margin-bottom: 6px; }
+  button {
+    font: inherit;
+    cursor: pointer;
+    border: none;
+    border-radius: 12px;
+    padding: 14px 18px;
+    font-weight: 700;
+    font-size: 1rem;
+    background: var(--accent);
+    color: #14152c;
+    transition: transform 0.08s ease, opacity 0.2s ease;
+    width: 100%;
+  }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.secondary { background: var(--card2); color: var(--text); border: 1px solid var(--border); }
+  button.danger { background: var(--bad); color: #2a0a0a; }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  button.small { width: auto; padding: 8px 14px; font-size: 0.85rem; }
+  .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .btn-grid.single { grid-template-columns: 1fr; }
+  input[type=text] {
+    font: inherit;
+    width: 100%;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    color: var(--text);
+  }
+  input[type=number] {
+    font: inherit;
+    width: 64px;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    color: var(--text);
+    text-align: center;
+  }
+  label { font-size: 0.85rem; color: var(--muted); display:block; margin-bottom: 6px; }
+  .pill {
+    display: inline-block;
+    background: var(--card2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin: 2px 4px 2px 0;
+  }
+  .pill.sheriff { background: var(--warn); color: #3a2900; border-color: var(--warn); font-weight: 700; }
+  .pill.leader { background: var(--accent); color: #14152c; border-color: var(--accent); font-weight: 700; }
+  .roomcode { font-size: 2.2rem; font-weight: 800; letter-spacing: 0.12em; text-align: center; color: var(--accent); }
+  .playerlist { display: flex; flex-direction: column; gap: 8px; }
+  .playerrow {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+  }
+  .playerrow.dead { opacity: 0.5; text-decoration: line-through; }
+  .playerrow.speaking { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; text-decoration: none; opacity: 1; }
+  .playerrow.pickable { border-color: var(--warn); box-shadow: 0 0 0 2px var(--warn) inset; }
+  .playerrow .name { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .seatnum { color: var(--muted); font-size: 0.75rem; width: 18px; display: inline-block; text-align: right; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); display: inline-block; }
+  .dot.off { background: #666; }
+  .choicebtn {
+    width: 100%; text-align: left; background: var(--bg2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 12px; padding: 14px; font-weight: 600;
+  }
+  .choicebtn.selected { border-color: var(--accent); background: var(--card2); box-shadow: 0 0 0 2px var(--accent) inset; }
+  .rolecard { text-align: center; padding: 26px 16px; }
+  .rolecard .roleicon { font-size: 3rem; }
+  .rolecard .rolename { font-size: 1.5rem; font-weight: 800; margin: 6px 0; }
+  .rolecard .team { color: var(--muted); font-size: 0.9rem; margin-bottom: 10px; }
+  .banner { text-align: center; padding: 10px; border-radius: 10px; background: var(--card2); color: var(--muted); font-size: 0.9rem; margin-bottom: 14px; }
+  .error { color: var(--bad); font-size: 0.9rem; margin-top: 6px; min-height: 1.2em; }
+  .log { max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  .log .entry { font-size: 0.82rem; color: var(--muted); }
+  .divider { height: 1px; background: var(--border); margin: 14px 0; }
+  .badgebar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+  .tiny { font-size: 0.78rem; color: var(--muted); }
+  a.link, a.link:visited { color: var(--accent); }
+  .flex-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .role-config-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .role-config-row:last-child { border-bottom: none; }
+  .role-config-row .rname { font-weight: 600; }
+  .timer-config-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .timer-config-row:last-child { border-bottom: none; }
+  .group-title { margin-top: 16px; margin-bottom: 2px; font-weight: 700; color: var(--text); font-size: 0.85rem; }
+  .group-title:first-child { margin-top: 4px; }
+  .footer-note { text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: 24px; }
+  .winner-village { color: var(--good); }
+  .winner-wolves { color: var(--bad); }
+  .icon-btn { width: auto; padding: 8px 12px; background: var(--card2); border: 1px solid var(--border); color: var(--text); }
+  .countdown { font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .speaker-highlight { text-align: center; padding: 18px; }
+  .speaker-highlight .who { font-size: 1.4rem; font-weight: 800; margin: 6px 0; }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 50;
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  .modal-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 18px 18px 0 0;
+    padding: 20px; max-width: 560px; width: 100%; max-height: 85vh; overflow-y: auto;
+  }
+  @media (min-width: 620px) {
+    .modal-overlay { align-items: center; }
+    .modal-card { border-radius: 18px; }
+  }
+  .role-entry { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+  .role-entry .rn { font-weight: 700; }
+  .role-entry p { margin: 4px 0 0; font-size: 0.85rem; }
+  .retro-entry { font-size: 0.88rem; color: var(--text); padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .retro-entry:last-child { border-bottom: none; }
+</style>
+</head>
+<body>
+<div id="app"><div class="center" style="padding-top:60px;color:var(--muted)">Loading…</div></div>
+<div id="modal-root"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  const $app = document.getElementById('app');
+  const $modalRoot = document.getElementById('modal-root');
+  const LS_KEY = 'werewolf_session_v2';
+
+  let session = loadSession();   // {roomCode, playerId, token}
+  let view = null;               // last fetched view
+  let pollTimer = null;
+  let busy = false;              // true while a POST action is in-flight (avoid double taps)
+  let uiError = '';
+  let showRulesModal = false;
+  let rolesInfo = null;          // cached /api/roles response
+
+  function loadSession() {
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e) { return null; }
+  }
+  function saveSession(s) {
+    session = s;
+    try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch (e) {}
+  }
+  function clearSession() {
+    session = null;
+    try { localStorage.removeItem(LS_KEY); } catch (e) {}
+    stopPolling();
+  }
+
+  async function api(action, body) {
+    const res = await fetch('/api/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    return res.json();
+  }
+  function authBody(extra) {
+    return Object.assign({ roomCode: session.roomCode, playerId: session.playerId, token: session.token }, extra || {});
+  }
+
+  // If a call comes in while one is already in flight, it used to be
+  // silently dropped — fine for a double-tapped vote button, but a real bug
+  // for the lobby config fields: a human (or a test) tweaking two timers or
+  // role counts back-to-back could lose whichever edit raced the in-flight
+  // request, leaving that field stuck at its old value with no error shown.
+  // Queue the latest such call instead and replay it once the current one
+  // settles, so the last edit always ends up applied.
+  let pendingCall = null;
+
+  async function doAction(action, body, opts) {
+    if (busy) { pendingCall = [action, body, opts]; return; }
+    busy = true;
+    uiError = '';
+    try {
+      const result = await api(action, body);
+      if (!result.ok) {
+        uiError = result.error || 'Something went wrong.';
+      } else if (opts && opts.onResult) {
+        opts.onResult(result);
+      }
+    } catch (e) {
+      uiError = 'Network error — check your connection.';
+    }
+    busy = false;
+    await pollOnce();
+    render();
+    if (pendingCall) {
+      const next = pendingCall;
+      pendingCall = null;
+      doAction(next[0], next[1], next[2]);
+    }
+  }
+
+  async function pollOnce() {
+    if (!session) return;
+    try {
+      const params = new URLSearchParams({ room: session.roomCode, playerId: session.playerId, token: session.token });
+      const res = await fetch('/api/state?' + params.toString());
+      const data = await res.json();
+      if (data.ok) {
+        view = data.view;
+      } else {
+        view = null;
+        clearSession();
+        landingMode = 'menu';
+      }
+    } catch (e) {
+      // transient network hiccup — keep last view, try again next tick
+    }
+  }
+
+  function startPolling() {
+    stopPolling();
+    pollOnce().then(render);
+    pollTimer = setInterval(async () => { await pollOnce(); render(); }, 900);
+  }
+  function stopPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  function loadRolesInfo() {
+    fetch('/api/roles').then((r) => r.json()).then((d) => {
+      if (d.ok) { rolesInfo = d; renderModal(); }
+    }).catch(() => {});
+  }
+  function openRulesModal() {
+    showRulesModal = true;
+    if (!rolesInfo) loadRolesInfo();
+    renderModal();
+  }
+
+  // ---------------------------------------------------------------------
+  // Rendering
+  // ---------------------------------------------------------------------
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  const ICON_FALLBACK = { Werewolf: '🐺', WerewolfKing: '🐺👑', Villager: '🧑‍🌾', Seer: '🔮', Witch: '🧪', Hunter: '🏹', Fool: '🃏', Guard: '🛡️', Knight: '⚔️' };
+  function roleIcon(role) {
+    if (rolesInfo) { const r = rolesInfo.roles.find((r) => r.name === role); if (r) return r.icon; }
+    return ICON_FALLBACK[role] || '🎭';
+  }
+  function roleLabel(role) {
+    if (rolesInfo) { const r = rolesInfo.roles.find((r) => r.name === role); if (r) return r.label; }
+    return role;
+  }
+  // 'right' walks the fixed seating list downward (wraps top); 'left' walks
+  // it upward (wraps bottom). Small shared helper so the roster row and the
+  // "Now speaking" card agree on the same arrow.
+  function dirArrowFor(direction) {
+    return direction === 'right' ? '⬇️' : direction === 'left' ? '⬆️' : '';
+  }
+  function nameOf(pid) {
+    if (!view) return '?';
+    const p = view.players.find((p) => p.id === pid);
+    return p ? p.name : '?';
+  }
+
+  function setBody(phase) {
+    const dayish = phase === 'day_announce' || phase === 'day_discussion' || phase === 'day_vote_countdown' || phase === 'day_vote' || phase === 'game_over';
+    document.body.classList.toggle('day', !!dayish);
+  }
+
+  // While the leader is actively editing a lobby config field (role counts,
+  // timers), a poll-driven re-render can land between a change event being
+  // dispatched and the server acking it, which would blow away the in-flight
+  // edit and snap it back to the stale value — annoying for a human typing,
+  // and a real race the tests can hit too. Skip re-rendering the whole app
+  // for polling ticks while focus is inside one of those config panels; the
+  // change handlers already push each edit to the server as it happens, and
+  // we still poll (keep `view` fresh) so nothing else goes stale.
+  // Debounced save for the role-count and timer config panels. Waiting for
+  // edits to settle (instead of firing a network call per keystroke) and
+  // then reading every input fresh at send time means there's only ever one
+  // save per panel in flight, and it always reflects the latest DOM — no
+  // race between a slower in-flight request and a faster later one.
+  //
+  // While an edit is unsaved (the debounce is pending, or the save request
+  // for it is still in flight), a poll-driven re-render must not touch the
+  // lobby: it would rebuild the whole panel from the server's still-stale
+  // view and snap the field back. hasUnsavedLobbyConfigEdits() is that
+  // guard — render() skips the rebuild while it's true, and the save
+  // itself calls render() once it clears so the rest of the page (e.g. the
+  // Start button's enabled state) catches up right after.
+  const configSaveTimers = { roles: null, timers: null };
+  const configPending = { roles: false, timers: false };
+  function hasUnsavedLobbyConfigEdits() {
+    return configPending.roles || configPending.timers;
+  }
+  function scheduleConfigSave(kind) {
+    configPending[kind] = true;
+    if (configSaveTimers[kind]) clearTimeout(configSaveTimers[kind]);
+    configSaveTimers[kind] = setTimeout(async () => {
+      configSaveTimers[kind] = null;
+      if (kind === 'roles') {
+        const cfg = {};
+        document.querySelectorAll('.role-input').forEach((i) => { cfg[i.dataset.role] = i.value; });
+        await doAction('player/setRoleConfig', authBody({ roleConfig: cfg }));
+      } else {
+        const t = {};
+        document.querySelectorAll('.timer-input').forEach((i) => { t[i.dataset.timer] = i.value; });
+        await doAction('player/setTimers', authBody({ timers: t }));
+      }
+      configPending[kind] = false;
+      render();
+    }, 300);
+  }
+
+  function render() {
+    // Any re-render (from a poll tick, or from doAction's own post-request
+    // refresh) fully rebuilds $app.innerHTML from scratch, which would blow
+    // away an in-progress edit in a lobby config field — including one that
+    // hasn't been sent to the server yet, or whose ack just hasn't landed —
+    // snapping it back to a stale value out from under whoever is typing.
+    // Skip the rebuild while focus is inside one of those panels; nothing
+    // else needs to redraw while the only thing on screen a human (or a
+    // test driving the UI the same way) could be looking at is that field.
+    if (hasUnsavedLobbyConfigEdits()) return;
+    if (!session) renderLanding();
+    else renderPlayer();
+    renderModal();
+  }
+
+  function renderModal() {
+    if (!showRulesModal) { $modalRoot.innerHTML = ''; return; }
+    let html = '<div class="modal-overlay" id="modal-overlay"><div class="modal-card">';
+    html += '<div class="flex-between"><h2 style="margin:0">📖 Roles &amp; Rules</h2><button class="small ghost" id="btn-close-modal">Close</button></div>';
+    if (!rolesInfo) {
+      html += '<p>Loading…</p>';
+    } else {
+      html += '<h3>Win conditions</h3>';
+      html += `<div class="role-entry"><div class="rn">Majority (default)</div><p>${esc(rolesInfo.winConditions.majority)}</p></div>`;
+      html += `<div class="role-entry"><div class="rn">Extinction</div><p>${esc(rolesInfo.winConditions.extinction)}</p></div>`;
+      const groups = [['wolf', '🐺 Werewolves'], ['villager', '🧑‍🌾 Villagers'], ['god', '✨ Gods (special village roles)']];
+      for (const [cat, title] of groups) {
+        html += `<h3 style="margin-top:16px">${title}</h3>`;
+        for (const r of rolesInfo.roles.filter((r) => r.category === cat)) {
+          html += `<div class="role-entry"><div class="rn">${r.icon} ${esc(r.label)}</div><p>${esc(r.blurb)}</p></div>`;
+        }
+      }
+      html += '<h3 style="margin-top:16px">How the day runs</h3>';
+      html += '<div class="role-entry"><p>Speech order follows the seating circle: if exactly one player died, it starts next to them (the Sheriff picks which side, or it\'s random with no Sheriff). If no one — or more than one — died, the Sheriff speaks last and picks who starts; with no Sheriff, a random player and direction is picked instead. The Knight and Werewolf King can use their one-time ability at any point during discussion, even interrupting the current speaker — night deaths never say how someone died, only that they did.</p></div>';
+    }
+    html += '</div></div>';
+    $modalRoot.innerHTML = html;
+    document.getElementById('btn-close-modal').onclick = () => { showRulesModal = false; renderModal(); };
+    document.getElementById('modal-overlay').onclick = (e) => { if (e.target.id === 'modal-overlay') { showRulesModal = false; renderModal(); } };
+  }
+
+  // ---- Landing / Create / Join ----
+  let landingMode = 'menu'; // 'menu' | 'join' | 'create'
+  let joinRoomInput = '';
+  let nameInput = '';
+
+  function renderLanding() {
+    setBody(null);
+    if (landingMode === 'join') return renderEntryForm('join');
+    if (landingMode === 'create') return renderEntryForm('create');
+    $app.innerHTML = `
+      <div class="hero">
+        <div class="moon">🐺🌕</div>
+        <h1>Werewolf Moderator</h1>
+        <p>An automatic moderator for Werewolf night — everyone joins and plays from their own phone. Whoever starts the room plays too.</p>
+      </div>
+      <div class="stack">
+        <button id="btn-create">🎭 Create a Game</button>
+        <button id="btn-join" class="secondary">🐺 Join a Game</button>
+        <button id="btn-rules" class="ghost">📖 Roles &amp; Rules reference</button>
+      </div>
+      <p class="footer-note">Whoever creates a room becomes its lobby leader — they can tune settings and start the game — but they draw a role and play like everyone else. Nobody sees anyone else's role or any secret information.</p>
+    `;
+    document.getElementById('btn-create').onclick = () => { landingMode = 'create'; render(); };
+    document.getElementById('btn-join').onclick = () => { landingMode = 'join'; render(); };
+    document.getElementById('btn-rules').onclick = openRulesModal;
+  }
+
+  function renderEntryForm(mode) {
+    const urlRoom = new URLSearchParams(location.search).get('room');
+    if (mode === 'join' && urlRoom && !joinRoomInput) joinRoomInput = urlRoom.toUpperCase();
+    $app.innerHTML = `
+      <div class="card">
+        <h2>${mode === 'create' ? 'Create a Game' : 'Join a Game'}</h2>
+        <div class="stack">
+          ${mode === 'join' ? `
+          <div>
+            <label>Room code</label>
+            <input type="text" id="in-room" maxlength="4" autocapitalize="characters" autocomplete="off" placeholder="ABCD" value="${esc(joinRoomInput)}" style="text-transform:uppercase;letter-spacing:0.1em;font-size:1.3rem;text-align:center" />
+          </div>` : ''}
+          <div>
+            <label>Your name</label>
+            <input type="text" id="in-name" maxlength="24" autocomplete="off" placeholder="e.g. Sam" value="${esc(nameInput)}" />
+          </div>
+          <button id="btn-submit">${mode === 'create' ? 'Create room & join' : 'Join'}</button>
+          <button id="btn-back" class="ghost">Back</button>
+          <div class="error">${esc(uiError)}</div>
+        </div>
+      </div>
+    `;
+    const inRoom = document.getElementById('in-room');
+    const inName = document.getElementById('in-name');
+    if (inRoom) inRoom.oninput = () => { joinRoomInput = inRoom.value.toUpperCase(); };
+    inName.oninput = () => { nameInput = inName.value; };
+    document.getElementById('btn-back').onclick = () => { landingMode = 'menu'; uiError = ''; render(); };
+    document.getElementById('btn-submit').onclick = async () => {
+      if (busy) return;
+      busy = true; uiError = '';
+      const result = mode === 'create'
+        ? await api('player/createRoom', { name: nameInput.trim() })
+        : await api('player/join', { roomCode: joinRoomInput.trim(), name: nameInput.trim() });
+      busy = false;
+      if (!result.ok) { uiError = result.error || 'Could not continue.'; render(); return; }
+      saveSession({ roomCode: result.roomCode, playerId: result.playerId, token: result.token });
+      startPolling();
+    };
+  }
+
+  // ---- Main player view ----
+  function renderPlayer() {
+    if (!view) {
+      $app.innerHTML = `<div class="center" style="padding-top:60px;color:var(--muted)">Reconnecting…</div>`;
+      return;
+    }
+    setBody(view.phase);
+    let html = '';
+    const shareUrl = location.origin + '/?room=' + view.roomCode;
+    html += `
+      <div class="badgebar">
+        <div><b>${esc(view.roomCode)}</b> <span class="tiny">· ${esc(view.you.name)}</span></div>
+        <div class="row" style="align-items:center">
+          ${view.you.isSheriff ? '<span class="pill sheriff">🎖️ Sheriff</span>' : ''}
+          ${view.you.isLobbyLeader ? '<span class="pill leader">★ Leader</span>' : ''}
+          <button class="icon-btn small" id="btn-rules">📖</button>
+        </div>
+      </div>
+    `;
+    html += phaseBanner(view);
+
+    if (view.phase === 'lobby') {
+      html += renderLobby(view, shareUrl);
+    } else if (view.you.alive === false && view.phase !== 'game_over') {
+      html += `<div class="card center"><h2>💀 You have died</h2><p>You can keep watching. Stay quiet about what you knew!</p></div>`;
+      html += renderReactivePrompts(view);
+    } else {
+      html += renderRoleCard(view.you);
+      html += renderReactivePrompts(view);
+      html += renderPhaseBody(view);
+    }
+
+    if (view.phase !== 'lobby') {
+      html += renderPlayersCard(view);
+      html += renderLog(view.log);
+    }
+    $app.innerHTML = html;
+    document.getElementById('btn-rules').onclick = openRulesModal;
+    wireControls(view);
+  }
+
+  function phaseBanner(view) {
+    const map = {
+      lobby: '🌙 Waiting in the lobby',
+      night: '🌙 Night ' + view.dayNumber,
+      campaign: '🌅 Sheriff campaign — before anyone learns who died',
+      day_announce: '☀️ Day ' + view.dayNumber + ' — announcement',
+      day_discussion: '☀️ Day ' + view.dayNumber + ' — discussion',
+      day_vote_countdown: '☀️ Day ' + view.dayNumber + ' — get ready to vote',
+      day_vote: '☀️ Day ' + view.dayNumber + ' — voting',
+      game_over: '🏁 Game over',
+    };
+    return `<div class="banner">${map[view.phase] || view.phase}</div>`;
+  }
+
+  const ROLE_GROUPS = [['wolf', '🐺 Werewolves'], ['villager', '🧑‍🌾 Villagers'], ['god', '✨ Gods (special village roles)']];
+  const TIMER_LABELS = {
+    candidacy: 'Sheriff candidacy window',
+    electionVote: 'Sheriff election vote',
+    nightAction: 'Night actions (each step) / handoffs',
+    dayVote: 'Elimination vote',
+    speech: 'Max length of one speech turn',
+  };
+
+  function renderLobby(view, shareUrl) {
+    let html = `
+      <div class="card center">
+        <div class="tiny">ROOM CODE — share with players</div>
+        <div class="roomcode">${esc(view.roomCode)}</div>
+        <div class="tiny" style="margin-top:6px;word-break:break-all">${esc(shareUrl)}</div>
+        <div class="row" style="margin-top:10px;justify-content:center">
+          <button class="small secondary" id="btn-copy">Copy link</button>
+          <button class="small ghost" id="btn-rules-2">📖 Rules</button>
+        </div>
+      </div>
+    `;
+    if (!view.you.isLobbyLeader) {
+      html += `<div class="card center"><p>Waiting for the lobby leader to start the game…</p><p class="tiny">${view.lobby.playerCount} player(s) so far</p></div>`;
+      html += renderPlayersCard(view);
+      return html;
+    }
+    const L = view.lobby;
+    html += '<div class="card"><h3>Role setup</h3>';
+    html += `<p class="tiny">Assign a count to each role. The total must equal the number of players who have joined (${L.playerCount}).</p>`;
+    html += '<div id="role-config">';
+    for (const [cat, title] of ROLE_GROUPS) {
+      const rolesInCat = L.roleNames.filter((r) => (L.roleMeta[r] || {}).category === cat);
+      if (!rolesInCat.length) continue;
+      html += `<div class="group-title">${title}</div>`;
+      for (const role of rolesInCat) {
+        const cap = L.roleMeta[role].maxCount;
+        const maxAttr = cap != null ? cap : 30;
+        const capNote = cap != null ? ` <span class="tiny">(max ${cap})</span>` : '';
+        html += `
+          <div class="role-config-row">
+            <div class="rname">${esc(L.roleMeta[role].icon || '')} ${esc(L.roleMeta[role].label)}${capNote}</div>
+            <input type="number" min="0" max="${maxAttr}" data-role="${esc(role)}" class="role-input" value="${L.roleConfig[role] || 0}" />
+          </div>
+        `;
+      }
+    }
+    html += '</div>';
+    const total = L.totalRoleCount;
+    const wolfCount = (L.roleConfig.Werewolf || 0) + (L.roleConfig.WerewolfKing || 0);
+    const totalOk = total === L.playerCount && L.playerCount >= 3 && wolfCount >= 1;
+    html += `<div class="tiny" style="margin:10px 0">Total assigned: <b>${total}</b> / ${L.playerCount} players ${totalOk ? '✅' : ''}</div>`;
+    html += `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:12px">
+      <input type="checkbox" id="chk-reveal" ${view.revealRoleOnDeath ? 'checked' : ''} style="width:18px;height:18px" />
+      <span>Reveal a player's role when they die</span>
+    </label>`;
+    html += '<h3>Win condition</h3>';
+    html += '<div class="stack" id="wincond-choices" style="margin-bottom:14px">';
+    html += `<button class="choicebtn${view.winConditionMode === 'majority' ? ' selected' : ''}" data-mode="majority">Majority — wolves win once they equal or outnumber the village</button>`;
+    html += `<button class="choicebtn${view.winConditionMode === 'extinction' ? ' selected' : ''}" data-mode="extinction">Extinction — wolves win by wiping out all Gods OR all Villagers</button>`;
+    html += '</div>';
+    html += '<h3>Timers (seconds)</h3>';
+    html += '<p class="tiny">If someone doesn\'t act in time, the game auto-advances with no vote / no ability used, so no one can hold up the game.</p>';
+    html += '<div id="timer-config">';
+    for (const key of Object.keys(TIMER_LABELS)) {
+      html += `
+        <div class="timer-config-row">
+          <div class="rname">${esc(TIMER_LABELS[key])}</div>
+          <input type="number" min="5" max="600" data-timer="${key}" class="timer-input" value="${view.timers[key]}" />
+        </div>
+      `;
+    }
+    html += '</div>';
+    html += `<button id="btn-start" style="margin-top:14px" ${totalOk ? '' : 'disabled'}>Start Game</button>`;
+    if (uiError) html += `<div class="error">${esc(uiError)}</div>`;
+    html += '</div>';
+    html += renderPlayersCard(view, { removable: true });
+    return html;
+  }
+
+  function renderReactivePrompts(view) {
+    let html = '';
+    if (view.hunterNightStatus && view.hunterNightStatus.known && view.phase !== 'night' && view.phase !== 'lobby') {
+      const status = view.hunterNightStatus.canFire
+        ? '🏹 If you die before your next turn, you WILL be able to fire your gun.'
+        : '🚫 If you die before your next turn, you will NOT be able to fire your gun.';
+      html += `<div class="banner">${status}</div>`;
+    }
+    if (view.hunterShot && view.hunterShot.active) html += renderHunterShotUI(view);
+    if (view.sheriffHandoff && view.sheriffHandoff.active) html += renderSheriffHandoffUI(view);
+    if (view.sheriffDirection && view.sheriffDirection.active) html += renderSheriffDirectionUI(view);
+    return html;
+  }
+
+  function renderPhaseBody(view) {
+    if (view.phase === 'night') return renderNightBody(view);
+    if (view.phase === 'campaign') return renderCampaignBody(view);
+    if (view.phase === 'day_announce') return renderAnnounceBody(view);
+    if (view.phase === 'day_discussion') return renderDiscussionBody(view);
+    if (view.phase === 'day_vote_countdown') return renderVoteCountdownBody(view);
+    if (view.phase === 'day_vote') return renderDayVoteBody(view);
+    if (view.phase === 'game_over') return renderGameOverBody(view);
+    return '';
+  }
+
+  function renderNightBody(view) {
+    if (view.guardPhase && view.guardPhase.active) return renderGuardUI(view);
+    if (view.wolfPhase && view.wolfPhase.active) return renderWolfUI(view);
+    if (view.seerPhase && view.seerPhase.active) return renderSeerUI(view);
+    if (view.witchPhase && view.witchPhase.active) return renderWitchUI(view);
+    return `<div class="card center"><p>🌙 Night falls. Everyone sleeps.</p><p class="tiny">Other players are taking their turn — please wait quietly.</p></div>`;
+  }
+
+  function renderCampaignBody(view) {
+    const c = view.campaign;
+    if (!c) return '';
+    let html = '<div class="card"><h3>🗳️ Sheriff campaign</h3>';
+    html += `<p class="tiny">Nothing about last night has been revealed yet — the campaign happens first.</p>`;
+    if (c.subPhase === 'nominate') {
+      html += `<p>Running so far: ${c.candidateNames.length ? esc(c.candidateNames.join(', ')) : '(no one yet)'}</p>`;
+      html += `<p class="countdown center" style="font-size:1.3rem">${c.secondsLeft}s</p>`;
+      if (c.canToggle) {
+        html += c.youAreCandidate
+          ? `<button class="secondary" id="btn-withdraw">Withdraw my candidacy</button>`
+          : `<button id="btn-run">🎤 Run for Sheriff</button>`;
+      }
+    } else if (c.subPhase === 'speeches') {
+      html += `<div class="speaker-highlight"><div class="tiny">Now speaking</div><div class="who">${esc(nameOf(c.currentSpeakerId))}</div><div class="countdown">${c.secondsLeft}s</div></div>`;
+      if (c.isYourTurn) html += `<button id="btn-campaign-done">✅ I\'m done speaking</button>`;
+      html += `<p class="tiny" style="margin-top:8px">Speaking order: ${c.queue.map((id, i) => (i === c.pointer ? '<b>' : '') + esc(nameOf(id)) + (i === c.pointer ? '</b>' : '')).join(' → ')}</p>`;
+    } else if (c.subPhase === 'vote') {
+      html += `<p class="countdown center" style="font-size:1.3rem">${c.secondsLeft}s</p>`;
+      if (c.canVote) {
+        html += '<div class="stack" id="election-choices">';
+        for (const cand of c.candidates) {
+          const sel = c.yourVote === cand.id ? ' selected' : '';
+          html += `<button class="choicebtn${sel}" data-pid="${cand.id}">${esc(cand.name)}</button>`;
+        }
+        html += '</div>';
+      } else {
+        html += `<p>You can\'t vote right now.</p>`;
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderAnnounceBody(view) {
+    let html = `<div class="card"><div class="stack">` + (view.announcement || []).map((a) => `<p style="color:var(--text)">${esc(a)}</p>`).join('') + `</div></div>`;
+    html += `<div class="card center"><p class="tiny">Sorting out the morning…</p></div>`;
+    return html;
+  }
+
+  function renderDiscussionBody(view) {
+    let html = `<div class="card"><div class="stack">` + (view.announcement || []).map((a) => `<p style="color:var(--text)">${esc(a)}</p>`).join('') + `</div></div>`;
+    const d = view.discussion;
+    if (d) {
+      const dirTxt = dirArrowFor(d.direction) ? ` ${dirArrowFor(d.direction)}` : '';
+      html += `<div class="card speaker-highlight"><div class="tiny">Now speaking${dirTxt}</div><div class="who">${esc(nameOf(d.currentSpeakerId))}</div><div class="countdown">${d.secondsLeft}s</div><div class="tiny" style="margin-top:6px">${d.pointer + 1} / ${d.queue.length}</div></div>`;
+      if (d.isYourTurn) html += `<div class="card"><button id="btn-finish-speech">✅ I\'m done speaking</button></div>`;
+    }
+    if (view.knightDuel && view.knightDuel.active) html += renderKnightDuelUI(view);
+    if (view.wolfKingReveal && view.wolfKingReveal.active) html += renderWolfKingUI(view);
+    return html;
+  }
+
+  function renderVoteCountdownBody(view) {
+    return `<div class="card center"><h2>Get ready to vote…</h2><div class="countdown" style="font-size:2rem">${view.voteCountdown ? view.voteCountdown.secondsLeft : ''}s</div></div>`;
+  }
+
+  function renderDayVoteBody(view) {
+    if (view.dayVoteBlocked) {
+      return `<div class="card center"><p>🃏 You revealed yourself earlier and lost your right to vote. Watch the discussion unfold.</p></div>`;
+    }
+    return renderDayVoteUI(view);
+  }
+
+  function renderGameOverBody(view) {
+    const winnerClass = view.winner === 'village' ? 'winner-village' : 'winner-wolves';
+    const winnerText = view.winner === 'village' ? '🏡 The Village wins!' : '🐺 The Werewolves win!';
+    let html = `<div class="card center"><h2 class="${winnerClass}">${winnerText}</h2></div>`;
+    html += '<div class="card"><h3>Final roles</h3><div class="stack">';
+    for (const p of (view.reveal || [])) {
+      html += `<div class="flex-between"><span>${p.alive ? '🙂' : '💀'} ${roleIcon(p.role)} ${esc(p.name)}</span><b>${esc(p.roleLabel)}</b></div>`;
+    }
+    html += '</div></div>';
+    html += '<div class="card"><h3>Full recap</h3><div class="stack" style="gap:0">';
+    for (const e of (view.fullLog || [])) {
+      html += `<div class="retro-entry">${esc(e.text)}</div>`;
+    }
+    html += '</div></div>';
+    if (view.you.isLobbyLeader) html += `<button id="btn-new-game" style="margin-top:4px">Start a new game with this group</button>`;
+    return html;
+  }
+
+  function renderGuardUI(view) {
+    const gp = view.guardPhase;
+    let html = `<div class="card"><h3>🛡️ Choose who to protect</h3><div class="tiny">${gp.secondsLeft}s left</div>`;
+    if (gp.acted) {
+      html += `<p>You've made your choice. Waiting on the rest of the night…</p></div>`;
+      return html;
+    }
+    html += '<div class="stack" id="guard-choices">';
+    for (const c of gp.candidates) {
+      html += `<button class="choicebtn" data-pid="${c.id}" ${c.disabled ? 'disabled' : ''}>${esc(c.name)}${c.disabled ? ' (protected last night)' : ''}</button>`;
+    }
+    html += '</div>';
+    html += `<button class="ghost" id="btn-guard-skip" style="margin-top:8px">Protect no one tonight</button>`;
+    html += '</div>';
+    return html;
+  }
+
+  function renderWolfUI(view) {
+    const wp = view.wolfPhase;
+    let html = `<div class="card"><h3>🐺 Choose a victim</h3><div class="tiny">${wp.secondsLeft}s left</div>`;
+    html += `<p class="tiny">${wp.votedCount}/${wp.totalWolves} of your pack (🐺 below, in the seating order) have voted</p>`;
+    html += '<div class="stack" id="wolf-choices">';
+    for (const c of wp.candidates) {
+      const sel = wp.yourVote === c.id ? ' selected' : '';
+      html += `<button class="choicebtn${sel}" data-pid="${c.id}">${esc(c.name)}</button>`;
+    }
+    html += '</div></div>';
+    return html;
+  }
+  function renderSeerUI(view) {
+    const sp = view.seerPhase;
+    let html = `<div class="card"><h3>🔮 Look into someone\'s soul</h3><div class="tiny">${sp.secondsLeft}s left</div>`;
+    if (sp.acted) {
+      html += `<p>You\'ve made your choice. Waiting on the rest of the night…</p>`;
+      if (window.__seerResult) {
+        const r = window.__seerResult;
+        html += `<div class="banner">${esc(r.name)} is on the <b>${r.team === 'wolf' ? 'Werewolf' : 'Village'}</b> team.</div>`;
+      }
+    } else {
+      html += '<div class="stack" id="seer-choices">';
+      for (const c of sp.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${esc(c.name)}</button>`;
+      html += '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+  function renderWitchUI(view) {
+    const wp = view.witchPhase;
+    let html = `<div class="card"><h3>🧪 The Witch wakes</h3><div class="tiny">${wp.secondsLeft}s left</div>`;
+    if (wp.acted) {
+      html += `<p>You\'ve made your choice. Waiting on the rest of the night…</p></div>`;
+      return html;
+    }
+    if (wp.revealedVictim) {
+      html += `<p><b>${esc(wp.revealedVictim.name)}</b> was attacked by the wolves tonight.</p>`;
+    } else if (wp.noOneDiedTonight) {
+      html += `<p>The wolves did not choose a victim tonight.</p>`;
+    } else {
+      html += `<p>You\'ve already used your healing potion, so you are not told who the wolves attacked.</p>`;
+    }
+    html += '<div class="stack">';
+    if (wp.canHeal) html += `<button id="btn-witch-heal">💚 Heal ${esc(wp.revealedVictim.name)}</button>`;
+    if (wp.canPoison) {
+      html += `<div class="tiny" style="margin-top:8px">☠️ Poison someone:</div>`;
+      html += '<div class="stack" id="witch-poison-choices">';
+      for (const c of wp.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${esc(c.name)}</button>`;
+      html += '</div>';
+    }
+    html += `<button class="ghost" id="btn-witch-skip">Do nothing tonight</button>`;
+    html += '</div></div>';
+    return html;
+  }
+  function renderHunterShotUI(view) {
+    let html = `<div class="card"><h3>🏹 Take someone with you!</h3><div class="tiny">${view.hunterShot.secondsLeft}s left</div><p>You may fire once at another player.</p>`;
+    html += '<div class="stack" id="hunter-choices">';
+    for (const c of view.hunterShot.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${esc(c.name)}</button>`;
+    html += '</div></div>';
+    return html;
+  }
+  function renderSheriffHandoffUI(view) {
+    let html = `<div class="card"><h3>🎖️ You died holding the badge</h3><div class="tiny">${view.sheriffHandoff.secondsLeft}s left</div><p>Pass it to someone else, or discard it for the rest of the game.</p>`;
+    html += '<div class="stack" id="handoff-choices">';
+    for (const c of view.sheriffHandoff.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${esc(c.name)}</button>`;
+    html += '</div>';
+    html += `<button class="ghost" id="btn-handoff-discard" style="margin-top:8px">Discard the badge — no Sheriff</button>`;
+    html += '</div>';
+    return html;
+  }
+  function renderSheriffDirectionUI(view) {
+    const d = view.sheriffDirection;
+    let html = `<div class="card"><h3>🎖️ Pick the speaking order</h3><div class="tiny">${d.secondsLeft}s left</div>`;
+    html += d.kind === 'death'
+      ? `<p>${d.deceasedName ? esc(d.deceasedName) + ' died' : 'Someone died'} last night. Who should speak first, right next to them?</p>`
+      : `<p>You\'ll speak last. Who should start, right next to you?</p>`;
+    html += '<div class="stack">';
+    if (d.leftName) html += `<button class="choicebtn" data-side="left">⬅️ ${esc(d.leftName)}</button>`;
+    if (d.rightName) html += `<button class="choicebtn" data-side="right">➡️ ${esc(d.rightName)}</button>`;
+    html += '</div></div>';
+    return html;
+  }
+  function renderKnightDuelUI(view) {
+    let html = '<div class="card"><h3>⚔️ Knight\'s Duel (once per game)</h3>';
+    html += '<p class="tiny">Reveal yourself and challenge someone, at any point during discussion. If they\'re a Werewolf, they die and night falls immediately. If they\'re innocent, you die of shame instead and the day continues.</p>';
+    html += '<div class="stack" id="knight-choices">';
+    for (const c of view.knightDuel.candidates) html += `<button class="choicebtn" data-pid="${c.id}" data-name="${esc(c.name)}">${esc(c.name)}</button>`;
+    html += '</div></div>';
+    return html;
+  }
+  function renderWolfKingUI(view) {
+    let html = '<div class="card"><h3>🐺👑 Reveal the King (once per game)</h3>';
+    html += '<p class="tiny">Reveal yourself and choose a player to take down with you, at any point during discussion. You will both die.</p>';
+    html += '<div class="stack" id="wolfking-choices">';
+    for (const c of view.wolfKingReveal.candidates) html += `<button class="choicebtn" data-pid="${c.id}" data-name="${esc(c.name)}">${esc(c.name)}</button>`;
+    html += '</div></div>';
+    return html;
+  }
+  function renderDayVoteUI(view) {
+    const dv = view.dayVote;
+    let html = `<div class="card"><h3>☀️ Vote to eliminate</h3><div class="tiny">${dv.secondsLeft}s left</div>`;
+    html += `<p class="tiny">${dv.votedCount}/${dv.totalVoters} voted · your vote is worth ${dv.youWeight}x · it\'s ok to abstain</p>`;
+    html += '<div class="stack" id="vote-choices">';
+    for (const c of dv.candidates) {
+      const sel = dv.yourVote === c.id ? ' selected' : '';
+      html += `<button class="choicebtn${sel}" data-pid="${c.id}">${esc(c.name)}</button>`;
+    }
+    html += '</div>';
+    if (dv.tally && dv.tally.length) {
+      html += '<div class="divider"></div><div class="stack">';
+      for (const t of dv.tally.slice().sort((a,b)=>b.weight-a.weight)) {
+        html += `<div class="flex-between tiny"><span>${esc(t.name)}</span><b>${t.weight}</b></div>`;
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderRoleCard(you) {
+    let html = '<div class="card rolecard" id="rolecard">';
+    if (!you.viewedRole) {
+      html += `<div class="roleicon">🎴</div><div class="rolename">Tap to reveal your role</div>
+        <button id="btn-reveal-role" style="margin-top:10px">Reveal my role</button>`;
+    } else {
+      html += `<div class="roleicon">${roleIcon(you.role)}</div>
+        <div class="rolename">${esc(you.roleLabel)}</div>
+        <div class="team">Team: ${you.team === 'wolf' ? '🐺 Werewolves' : '🧑‍🌾 Village'}</div>
+        <p>${esc(you.roleBlurb)}</p>`;
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderPlayersCard(view, opts) {
+    opts = opts || {};
+    // 'right' walks this list downward (wrapping from the bottom back to the
+    // top); 'left' walks it upward (wrapping from the top back to the
+    // bottom). Shown explicitly next to the speaker so no one has to infer
+    // direction by watching the highlight jump around.
+    const direction = view.discussion ? view.discussion.direction : null;
+    const dirNote = direction
+      ? `<p class="tiny" style="margin-top:2px">${dirArrowFor(direction)} Speaking order is moving ${direction === 'right' ? 'down this list, wrapping from the bottom back to the top' : 'up this list, wrapping from the top back to the bottom'}.</p>`
+      : '';
+    let html = `<div class="card"><h3>Seating order</h3>${dirNote}<div class="playerlist">`;
+    const speakingId = view.phase === 'day_discussion' && view.discussion ? view.discussion.currentSpeakerId
+      : view.phase === 'campaign' && view.campaign && view.campaign.subPhase === 'speeches' ? view.campaign.currentSpeakerId : null;
+    // While the Sheriff is picking who starts (only shown on the Sheriff's
+    // own screen — everyone else has no view.sheriffDirection at all), tag
+    // the two candidate rows so the choice reads directly off the roster
+    // instead of asking the Sheriff to hold two names in their head.
+    const pickIds = view.sheriffDirection && view.sheriffDirection.active
+      ? { left: view.sheriffDirection.leftId, right: view.sheriffDirection.rightId }
+      : null;
+    view.players.forEach((p, i) => {
+      const deadClass = p.alive ? '' : ' dead';
+      const speakClass = p.id === speakingId ? ' speaking' : '';
+      const pickSide = pickIds && p.id === pickIds.left ? 'left' : pickIds && p.id === pickIds.right ? 'right' : null;
+      const pickClass = pickSide ? ' pickable' : '';
+      const roleTxt = p.role ? ` — ${roleIcon(p.role)} ${esc(roleLabel(p.role))}` : '';
+      const voteTxt = p.canVote === false ? ' <span class="tiny">(no vote)</span>' : '';
+      const leaderTxt = p.isLobbyLeader ? ' ★' : '';
+      // Wolves recognize each other for the whole game, not just during their
+      // night vote — the server only sets this flag on a wolf-team viewer's
+      // own view, so this marker is invisible to everyone else.
+      const packTxt = p.isWolfTeammate ? ' <span title="Your fellow wolf">🐺</span>' : '';
+      const pickTxt = pickSide ? ` <span class="tiny">(${pickSide === 'left' ? '⬅️' : '➡️'})</span>` : '';
+      const speakDirTxt = speakClass && dirArrowFor(direction) ? ` <span class="tiny">${dirArrowFor(direction)}</span>` : '';
+      html += `
+        <div class="playerrow${deadClass}${speakClass}${pickClass}">
+          <span class="name"><span class="seatnum">${i + 1}.</span><span class="dot ${p.connected ? '' : 'off'}"></span>${esc(p.name)}${leaderTxt}${p.isSheriff ? ' 🎖️' : ''}${packTxt}${roleTxt}${voteTxt}${pickTxt}${speakDirTxt}</span>
+          ${opts.removable && view.phase === 'lobby' && !p.isLobbyLeader ? `<button class="small ghost" data-remove="${p.id}">Remove</button>` : ''}
+        </div>
+      `;
+    });
+    html += '</div></div>';
+    return html;
+  }
+
+  function renderLog(entries) {
+    if (!entries || !entries.length) return '';
+    let html = '<div class="card tight"><h3>Log</h3><div class="log">';
+    for (const e of entries.slice().reverse().slice(0, 12)) {
+      html += `<div class="entry">${esc(e.text)}</div>`;
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  function wireControls(view) {
+    const b = (id) => document.getElementById(id);
+    if (b('btn-copy')) {
+      b('btn-copy').onclick = () => { navigator.clipboard && navigator.clipboard.writeText(location.origin + '/?room=' + view.roomCode).catch(() => {}); };
+    }
+    if (b('btn-rules-2')) b('btn-rules-2').onclick = openRulesModal;
+
+    // Lobby settings (leader only). Debounced: multiple fields can change in
+    // quick succession (typing across several role-count or timer boxes),
+    // and firing a network call per keystroke let a slower in-flight request
+    // race a faster later one and win, silently reverting a just-edited
+    // field back to its old value. Waiting for edits to settle and then
+    // reading every input fresh at send time avoids that entirely — there's
+    // only ever one save in flight, and it always reflects the latest DOM.
+    document.querySelectorAll('.role-input').forEach((el) => {
+      el.onchange = () => scheduleConfigSave('roles');
+    });
+    document.querySelectorAll('.timer-input').forEach((el) => {
+      el.onchange = () => scheduleConfigSave('timers');
+    });
+    if (b('chk-reveal')) {
+      b('chk-reveal').onchange = (e) => doAction('player/setRevealRoleOnDeath', authBody({ value: e.target.checked }));
+    }
+    document.querySelectorAll('#wincond-choices [data-mode]').forEach((el) => {
+      el.onclick = () => doAction('player/setWinCondition', authBody({ mode: el.dataset.mode }));
+    });
+    if (b('btn-start')) b('btn-start').onclick = () => doAction('player/startGame', authBody());
+    document.querySelectorAll('[data-remove]').forEach((el) => {
+      el.onclick = () => doAction('player/removePlayer', authBody({ playerId: el.dataset.remove }));
+    });
+
+    // Role reveal
+    if (b('btn-reveal-role')) b('btn-reveal-role').onclick = () => doAction('player/viewedRole', authBody());
+
+    // Night actions
+    document.querySelectorAll('#guard-choices [data-pid]:not([disabled])').forEach((el) => {
+      el.onclick = () => doAction('player/guardProtect', authBody({ action: 'protect', targetId: el.dataset.pid }));
+    });
+    if (b('btn-guard-skip')) b('btn-guard-skip').onclick = () => doAction('player/guardProtect', authBody({ action: 'skip' }));
+    document.querySelectorAll('#wolf-choices [data-pid]').forEach((el) => {
+      el.onclick = () => doAction('player/wolfVote', authBody({ targetId: el.dataset.pid }));
+    });
+    document.querySelectorAll('#seer-choices [data-pid]').forEach((el) => {
+      el.onclick = () => doAction('player/seerView', authBody({ targetId: el.dataset.pid }), { onResult: (r) => { window.__seerResult = r.result; } });
+    });
+    if (b('btn-witch-heal')) b('btn-witch-heal').onclick = () => doAction('player/witchAction', authBody({ action: 'heal' }));
+    if (b('btn-witch-skip')) b('btn-witch-skip').onclick = () => doAction('player/witchAction', authBody({ action: 'skip' }));
+    document.querySelectorAll('#witch-poison-choices [data-pid]').forEach((el) => {
+      el.onclick = () => doAction('player/witchAction', authBody({ action: 'poison', targetId: el.dataset.pid }));
+    });
+
+    // Campaign
+    if (b('btn-run')) b('btn-run').onclick = () => doAction('player/runForSheriff', authBody({ action: 'run' }));
+    if (b('btn-withdraw')) b('btn-withdraw').onclick = () => doAction('player/runForSheriff', authBody({ action: 'withdraw' }));
+    if (b('btn-campaign-done')) b('btn-campaign-done').onclick = () => doAction('player/campaignSpeechDone', authBody());
+    document.querySelectorAll('#election-choices [data-pid]').forEach((el) => {
+      el.onclick = () => doAction('player/electionVote', authBody({ targetId: el.dataset.pid }));
+    });
+
+    // Reactive prompts
+    document.querySelectorAll('#hunter-choices [data-pid]').forEach((el) => {
+      el.onclick = () => doAction('player/hunterShoot', authBody({ targetId: el.dataset.pid }));
+    });
+    document.querySelectorAll('#handoff-choices [data-pid]').forEach((el) => {
+      el.onclick = () => doAction('player/sheriffHandoff', authBody({ targetId: el.dataset.pid }));
+    });
+    if (b('btn-handoff-discard')) b('btn-handoff-discard').onclick = () => doAction('player/sheriffHandoff', authBody({ action: 'discard' }));
+    document.querySelectorAll('[data-side]').forEach((el) => {
+      el.onclick = () => doAction('player/sheriffDirection', authBody({ side: el.dataset.side }));
+    });
+
+    // Discussion
+    if (b('btn-finish-speech')) b('btn-finish-speech').onclick = () => doAction('player/finishSpeech', authBody());
+    document.querySelectorAll('#knight-choices [data-pid]').forEach((el) => {
+      el.onclick = () => {
+        if (!confirm('Reveal yourself as the Knight and duel ' + el.dataset.name + '? This cannot be undone.')) return;
+        doAction('player/knightDuel', authBody({ targetId: el.dataset.pid }));
+      };
+    });
+    document.querySelectorAll('#wolfking-choices [data-pid]').forEach((el) => {
+      el.onclick = () => {
+        if (!confirm('Reveal yourself as the Werewolf King and take ' + el.dataset.name + ' down with you? This cannot be undone.')) return;
+        doAction('player/wolfKingReveal', authBody({ targetId: el.dataset.pid }));
+      };
+    });
+
+    // Day vote
+    document.querySelectorAll('#vote-choices [data-pid]').forEach((el) => {
+      el.onclick = () => doAction('player/dayVote', authBody({ targetId: el.dataset.pid }));
+    });
+
+    // Game over
+    if (b('btn-new-game')) b('btn-new-game').onclick = () => doAction('player/resetGame', authBody());
+  }
+
+  // ---------------------------------------------------------------------
+  // Boot
+  // ---------------------------------------------------------------------
+  loadRolesInfo();
+  if (session) {
+    startPolling();
+  } else {
+    render();
+  }
+})();
+</script>
+</body>
+</html>
