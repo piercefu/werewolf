@@ -33,6 +33,11 @@ start. On a wolf's screen, teammates are marked with a small 🐺 next to
 their name in the seating order list that's always on screen; no other
 player ever sees that marker, on anyone.
 
+The **Hidden Wolf** (see **Roles** below) is the one exception to that
+exception: they don't know who the other wolves are, and the other wolves
+don't know about them either — the concealment runs both ways, so this
+marker never appears for or about a Hidden Wolf.
+
 ## Playing online — quick rundown
 
 1. One person opens the app, taps **Create a Game**, and enters their name.
@@ -166,6 +171,7 @@ recap too, just with final roles and the win/loss now attached.
 |---|---|---|
 | Werewolf | Wolf | Votes with the pack each night to choose a victim. |
 | Werewolf King | Wolf | Votes with the pack like a normal wolf. Once per game, at any point during day discussion (even interrupting the current speaker), may reveal himself and choose a player — both die immediately, publicly and in full detail. |
+| Hidden Wolf | Wolf | A wolf who doesn't wake with the pack and doesn't know who the other wolves are — and they don't know about him either. Has no kill of his own until every other wolf has died; once he's the last wolf standing, he wakes alone each night and chooses the kill by himself. A Seer checking him learns he's Village-aligned; a Knight's duel is not fooled and correctly reveals him as a wolf. Capped at one per game. |
 | Villager | Village | No power. Plain vote. |
 | Seer | Village (God) | Each night, learns whether one chosen player is Werewolf-team or Village-team. |
 | Witch | Village (God) | Sees the wolves' victim (only while she still holds her heal potion) and has one heal + one poison, each usable once per game. |
@@ -238,6 +244,10 @@ defaults. All are easy to change — just say so and I'll adjust the code:
   Sheriff's death fires immediately — the Fool can no longer vote, so the
   badge doesn't stay with them by default; they choose who gets it (or let
   it lapse) exactly like a dying Sheriff would.
+- The **Hidden Wolf**'s concealment only fools the Seer's magic. A Knight's
+  duel is a direct physical confrontation, not detection, so it correctly
+  reveals a Hidden Wolf as a wolf like any other. Capped at one per game,
+  same as the other unique roles.
 
 ## Deploying it (recommended: Render, free, no install needed)
 

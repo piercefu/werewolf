@@ -52,6 +52,14 @@ const ROLE_DEFS = {
     blurb: 'You vote with the other wolves each night, same as a normal Werewolf. In addition, once per game — at any point during the day discussion, even interrupting whoever is currently speaking — you may reveal your identity and choose another player. You both die immediately.',
     maxCount: 1,
   },
+  HiddenWolf: {
+    team: 'wolf',
+    category: 'wolf',
+    label: 'Hidden Wolf',
+    icon: '🐺🫥',
+    blurb: 'You are a Werewolf, but you do not wake up with the wolf pack and have no idea who your teammates are. You have no kill ability of your own until every other wolf has died — once you are the last wolf standing, you wake alone each night and choose the kill by yourself. The Seer\'s magic can\'t see through your disguise: checked on you, they learn you are Village-aligned. A Knight\'s duel is not fooled and correctly reveals you as a wolf. Because your fellow wolves don\'t know about you either, they could vote to kill you by mistake.',
+    maxCount: 1,
+  },
   Villager: {
     team: 'village',
     category: 'villager',
@@ -246,6 +254,15 @@ function alivePlayers(room) { return [...room.players.values()].filter((p) => p.
 function publicAlivePlayers(room) { return [...room.players.values()].filter((p) => p.publicAlive); }
 function aliveByRole(room, role) { return alivePlayers(room).filter((p) => p.role === role); }
 function aliveWolfTeam(room) { return alivePlayers(room).filter((p) => isWolfRole(p.role)); }
+// The wolves who can actually act tonight. A Hidden Wolf stays dormant
+// (no vote, no view of the wolves' night phase at all) for as long as any
+// other wolf-team member is still alive; once every other wolf has died,
+// the Hidden Wolf becomes the sole active wolf and wakes alone each night.
+function activeWolfTeam(room) {
+  const wolves = aliveWolfTeam(room);
+  const regular = wolves.filter((p) => p.role !== 'HiddenWolf');
+  return regular.length > 0 ? regular : wolves;
+}
 function votingEligible(room) { return alivePlayers(room).filter((p) => p.canVote !== false); }
 function getPlayer(room, playerId) { return room.players.get(playerId); }
 
@@ -953,14 +970,20 @@ function publicPlayerList(room, viewer) {
   // that has to be figured out relative to who's looking, same as role
   // visibility already is.
   const viewerIsWolf = !!(viewer && viewer.role && isWolfRole(viewer.role));
+  // The Hidden Wolf's concealment is mutual: they don't recognize the other
+  // wolves, and the other wolves don't recognize them either — so neither
+  // direction gets the 🐺 teammate marker for the other.
+  const viewerIsHiddenWolf = !!(viewer && viewer.role === 'HiddenWolf');
   const viewerId = viewer ? viewer.id : null;
   const gameOver = room.phase === 'game_over';
-  return room.seatOrder.length ? room.seatOrder.map((id) => playerListEntry(room, getPlayer(room, id), gameOver, viewerIsWolf, viewerId))
-    : [...room.players.values()].map((p) => playerListEntry(room, p, gameOver, viewerIsWolf, viewerId));
+  return room.seatOrder.length ? room.seatOrder.map((id) => playerListEntry(room, getPlayer(room, id), gameOver, viewerIsWolf, viewerId, viewerIsHiddenWolf))
+    : [...room.players.values()].map((p) => playerListEntry(room, p, gameOver, viewerIsWolf, viewerId, viewerIsHiddenWolf));
 }
-function playerListEntry(room, p, gameOver, viewerIsWolf, viewerId) {
+function playerListEntry(room, p, gameOver, viewerIsWolf, viewerId, viewerIsHiddenWolf) {
   const alive = gameOver ? p.alive : p.publicAlive;
   const showRole = gameOver || p.publiclyRevealed || (!alive && room.revealRoleOnDeath);
+  const showTeammate = viewerIsWolf && !showRole && p.id !== viewerId && isWolfRole(p.role)
+    && !viewerIsHiddenWolf && p.role !== 'HiddenWolf';
   return {
     id: p.id,
     name: p.name,
@@ -970,7 +993,7 @@ function playerListEntry(room, p, gameOver, viewerIsWolf, viewerId) {
     canVote: p.canVote !== false,
     isLobbyLeader: room.lobbyLeaderId === p.id,
     role: showRole ? p.role : undefined,
-    isWolfTeammate: viewerIsWolf && !showRole && p.id !== viewerId && isWolfRole(p.role) ? true : undefined,
+    isWolfTeammate: showTeammate ? true : undefined,
   };
 }
 
@@ -1030,14 +1053,19 @@ function buildPlayerView(room, player) {
         candidates: alivePlayers(room).map((p) => ({ id: p.id, name: p.name, disabled: p.id === room.guardLastProtectedId })),
       };
     }
-    if (room.nightSubPhase === 'wolves' && isWolfRole(player.role)) {
-      const wolves = aliveWolfTeam(room);
+    // A dormant Hidden Wolf (other wolves still alive) gets no wolfPhase at
+    // all — they don't wake up with the pack and don't even see that a
+    // wolves' phase is happening, per activeWolfTeam().
+    if (room.nightSubPhase === 'wolves' && isWolfRole(player.role) && activeWolfTeam(room).some((w) => w.id === player.id)) {
+      const wolves = activeWolfTeam(room);
       view.wolfPhase = {
         active: true, secondsLeft: secondsLeft(room.nightDeadline),
         // Wolves CAN target each other — a wolf-on-wolf kill is a real,
         // occasionally used strategy (e.g. to cast suspicion elsewhere, or
         // to get rid of a teammate whose play is putting the pack at risk).
-        // Only self-targeting is excluded.
+        // Only self-targeting is excluded. Note this also means a dormant
+        // Hidden Wolf can be targeted (and killed) by the other wolves —
+        // they have no way to recognize them as a teammate either.
         candidates: alivePlayers(room).filter((p) => p.id !== player.id).map((p) => ({ id: p.id, name: p.name })),
         yourVote: room.wolfVotes.get(player.id) || null,
         votedCount: room.wolfVotes.size,
@@ -1328,8 +1356,8 @@ const actions = {
         return { ok: false, error: `Only ${cap} ${ROLE_DEFS[role].label} allowed.` };
       }
     }
-    const wolfCount = (room.roleConfig.Werewolf || 0) + (room.roleConfig.WerewolfKing || 0);
-    if (wolfCount < 1) return { ok: false, error: 'Need at least 1 Werewolf (or Werewolf King).' };
+    const wolfCount = ROLE_NAMES.filter((r) => ROLE_DEFS[r].team === 'wolf').reduce((s, r) => s + (room.roleConfig[r] || 0), 0);
+    if (wolfCount < 1) return { ok: false, error: 'Need at least 1 Werewolf (or Werewolf King / Hidden Wolf).' };
     startGame(room);
     return { ok: true };
   },
@@ -1376,11 +1404,13 @@ const actions = {
     if (!ctx) return { ok: false, error: 'Not found.' };
     const { room, player } = ctx;
     if (room.phase !== 'night' || room.nightSubPhase !== 'wolves' || !isWolfRole(player.role) || !player.alive) return { ok: false, error: 'It’s not the wolves’ turn.' };
+    // A dormant Hidden Wolf (other wolves still alive) has no kill ability yet.
+    if (!activeWolfTeam(room).some((w) => w.id === player.id)) return { ok: false, error: 'It’s not the wolves’ turn.' };
     const target = getPlayer(room, body.targetId);
     // Wolves may target a fellow wolf — only self-targeting is blocked.
     if (!target || !target.alive || target.id === player.id) return { ok: false, error: 'Invalid target.' };
     room.wolfVotes.set(player.id, body.targetId);
-    if (room.wolfVotes.size >= aliveWolfTeam(room).length) advanceNightSubPhase(room);
+    if (room.wolfVotes.size >= activeWolfTeam(room).length) advanceNightSubPhase(room);
     return { ok: true };
   },
   'player/seerView': (body) => {
@@ -1392,7 +1422,11 @@ const actions = {
     const target = getPlayer(room, body.targetId);
     if (!target || !target.alive || target.id === player.id) return { ok: false, error: 'Invalid target.' };
     room.seerActedThisNight = true;
-    const result = { name: target.name, team: ROLE_DEFS[target.role].team };
+    // The Hidden Wolf's whole gimmick is fooling the Seer specifically —
+    // every other form of detection (e.g. a Knight's duel) still correctly
+    // identifies them as a wolf via isWolfRole/ROLE_DEFS.team as normal.
+    const apparentTeam = target.role === 'HiddenWolf' ? 'village' : ROLE_DEFS[target.role].team;
+    const result = { name: target.name, team: apparentTeam };
     log(room, `${player.name} (Seer) looked at ${target.name}.`, { secret: true });
     advanceNightSubPhase(room);
     return { ok: true, result };

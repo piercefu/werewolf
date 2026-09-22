@@ -299,7 +299,7 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
   }
 
-  const ICON_FALLBACK = { Werewolf: '🐺', WerewolfKing: '🐺👑', Villager: '🧑‍🌾', Seer: '🔮', Witch: '🧪', Hunter: '🏹', Fool: '🃏', Guard: '🛡️', Knight: '⚔️' };
+  const ICON_FALLBACK = { Werewolf: '🐺', WerewolfKing: '🐺👑', HiddenWolf: '🐺🫥', Villager: '🧑‍🌾', Seer: '🔮', Witch: '🧪', Hunter: '🏹', Fool: '🃏', Guard: '🛡️', Knight: '⚔️' };
   function roleIcon(role) {
     if (rolesInfo) { const r = rolesInfo.roles.find((r) => r.name === role); if (r) return r.icon; }
     return ICON_FALLBACK[role] || '🎭';
