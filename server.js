@@ -1058,6 +1058,11 @@ function buildPlayerView(room, player) {
     // wolves' phase is happening, per activeWolfTeam().
     if (room.nightSubPhase === 'wolves' && isWolfRole(player.role) && activeWolfTeam(room).some((w) => w.id === player.id)) {
       const wolves = activeWolfTeam(room);
+      // Wolves see each other's current picks live, so they can shift to
+      // converge on one target mid-phase — mirrors real wolves pointing/
+      // gesturing at each other during the night round. Only shown among
+      // the active pack itself (a dormant Hidden Wolf never sees this at
+      // all, since they have no wolfPhase view to begin with).
       view.wolfPhase = {
         active: true, secondsLeft: secondsLeft(room.nightDeadline),
         // Wolves CAN target each other — a wolf-on-wolf kill is a real,
@@ -1066,11 +1071,21 @@ function buildPlayerView(room, player) {
         // Only self-targeting is excluded. Note this also means a dormant
         // Hidden Wolf can be targeted (and killed) by the other wolves —
         // they have no way to recognize them as a teammate either.
-        candidates: alivePlayers(room).filter((p) => p.id !== player.id).map((p) => ({ id: p.id, name: p.name })),
+        candidates: alivePlayers(room).filter((p) => p.id !== player.id).map((p) => ({
+          id: p.id, name: p.name,
+          votedBy: wolves.filter((w) => room.wolfVotes.get(w.id) === p.id).map((w) => w.name),
+        })),
         yourVote: room.wolfVotes.get(player.id) || null,
         votedCount: room.wolfVotes.size,
         totalWolves: wolves.length,
         wolfPack: wolves.map((w) => ({ id: w.id, name: w.name })),
+        // Per-teammate status, in pack (seating) order — who's picked whom
+        // so far, and who's still deciding.
+        packStatus: wolves.map((w) => {
+          const targetId = room.wolfVotes.get(w.id) || null;
+          const target = targetId ? getPlayer(room, targetId) : null;
+          return { id: w.id, name: w.name, isYou: w.id === player.id, targetId, targetName: target ? target.name : null };
+        }),
       };
     }
     if (room.nightSubPhase === 'seer' && player.role === 'Seer') {
@@ -1410,7 +1425,18 @@ const actions = {
     // Wolves may target a fellow wolf — only self-targeting is blocked.
     if (!target || !target.alive || target.id === player.id) return { ok: false, error: 'Invalid target.' };
     room.wolfVotes.set(player.id, body.targetId);
-    if (room.wolfVotes.size >= activeWolfTeam(room).length) advanceNightSubPhase(room);
+    // Only fast-forward past the wolves' phase once the whole active pack has
+    // voted AND currently agrees on the same target. This is what makes the
+    // live pack-status display meaningful: wolves can watch each other's picks
+    // and switch to converge, the same way real wolves gesture at the table.
+    // If they haven't converged, the phase simply runs out the clock (a tie
+    // among differing votes is broken randomly at resolution, same as always) —
+    // it never locks in early on a disagreement.
+    const wolves = activeWolfTeam(room);
+    if (room.wolfVotes.size >= wolves.length) {
+      const targets = wolves.map((w) => room.wolfVotes.get(w.id));
+      if (targets.every((t) => t === targets[0])) advanceNightSubPhase(room);
+    }
     return { ok: true };
   },
   'player/seerView': (body) => {

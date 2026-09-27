@@ -129,6 +129,8 @@
     border: 1px solid var(--border); border-radius: 12px; padding: 14px; font-weight: 600;
   }
   .choicebtn.selected { border-color: var(--accent); background: var(--card2); box-shadow: 0 0 0 2px var(--accent) inset; }
+  .wolfvoters { color: var(--muted); font-weight: 400; margin-top: 4px; }
+  .wolfpack-status { line-height: 1.6; margin: 8px 0; }
   .rolecard { text-align: center; padding: 26px 16px; }
   .rolecard .roleicon { font-size: 3rem; }
   .rolecard .rolename { font-size: 1.5rem; font-weight: 800; margin: 6px 0; }
@@ -747,11 +749,18 @@
   function renderWolfUI(view) {
     const wp = view.wolfPhase;
     let html = `<div class="card"><h3>🐺 Choose a victim</h3><div class="tiny">${wp.secondsLeft}s left</div>`;
-    html += `<p class="tiny">${wp.votedCount}/${wp.totalWolves} of your pack (🐺 below, in the seating order) have voted</p>`;
+    html += `<p class="tiny">${wp.votedCount}/${wp.totalWolves} of your pack have voted. Change your pick any time — once you all agree on the same target, the night moves on right away.</p>`;
+    if (wp.packStatus && wp.packStatus.length > 1) {
+      html += '<p class="tiny wolfpack-status">' + wp.packStatus.map((w) => {
+        const who = w.isYou ? `<b>${esc(w.name)} (you)</b>` : esc(w.name);
+        return w.targetName ? `${who} → ${esc(w.targetName)}` : `${who} → <i>deciding…</i>`;
+      }).join(' &nbsp;|&nbsp; ') + '</p>';
+    }
     html += '<div class="stack" id="wolf-choices">';
     for (const c of wp.candidates) {
       const sel = wp.yourVote === c.id ? ' selected' : '';
-      html += `<button class="choicebtn${sel}" data-pid="${c.id}">${esc(c.name)}</button>`;
+      const voters = c.votedBy && c.votedBy.length ? `<div class="tiny wolfvoters">🐺 ${c.votedBy.map(esc).join(', ')}</div>` : '';
+      html += `<button class="choicebtn${sel}" data-pid="${c.id}">${esc(c.name)}${voters}</button>`;
     }
     html += '</div></div>';
     return html;

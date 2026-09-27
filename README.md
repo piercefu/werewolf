@@ -218,6 +218,13 @@ defaults. All are easy to change — just say so and I'll adjust the code:
   strategy (throwing suspicion elsewhere, cutting loose a packmate whose
   play is putting the team at risk). No one — wolf included — can vote for
   themselves, at night or during the day or Sheriff election.
+- **The wolf pack sees each other's picks live** during the kill vote — a
+  running "who's voting for whom" line, plus a 🐺 tag under each candidate
+  showing which packmates currently favor it — and can change their vote
+  freely, the same way real wolves gesture at the table to converge on a
+  target. The phase only closes early once the whole active pack agrees on
+  the same target; if they're still split when the timer runs out, it
+  resolves as a majority vote with a random tie-break, same as always.
 - Not voting, not using a night ability, and not ending your speech turn
   early are all fine — every one of those has its own timer and a defined
   no-op outcome if time runs out.
