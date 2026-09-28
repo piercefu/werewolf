@@ -201,6 +201,11 @@ function newRoom(code) {
     guardLastProtectedId: null,
     guardActedThisNight: false,
     seerActedThisNight: false,
+    // The Seer's own result, persisted server-side (not just returned once in
+    // the API response to their click) so it survives a page reload/refresh —
+    // otherwise a player whose phone reloads the page mid-night permanently
+    // loses the ability to see what they learned that night.
+    seerResult: null,
     witch: { healUsed: false, poisonUsed: false },
     witchActedThisNight: false,
     healedTargetId: null,
@@ -215,7 +220,7 @@ function newRoom(code) {
     pendingHunterShots: [], // [{hunterId, deadline}]
     pendingSheriffHandoff: null, // {sheriffId, deadline} | null
     pendingSheriffDirection: null, // {deadline, kind:'death'|'last', leftId, rightId, deceasedId?} | null
-    afterReactive: null, // what to do once all of the above are clear: 'campaign_wrap' | 'to_discussion' | 'to_night' | 'resume_discussion' | 'to_next_night_after_vote'
+    afterReactive: null, // what to do once all of the above are clear: 'to_discussion' | 'to_night' | 'resume_discussion' | 'to_next_night_after_vote'
 
     // --- day discussion state ---
     lastAnnouncement: [],
@@ -403,6 +408,7 @@ function beginNight(room) {
   room.guardProtectedId = null;
   room.guardActedThisNight = false;
   room.seerActedThisNight = false;
+  room.seerResult = null;
   room.witchActedThisNight = false;
   room.healedTargetId = null;
   room.poisonTargetId = null;
@@ -467,7 +473,17 @@ function resolveNight(room) {
   room.lastNightDeaths = deaths;
   room.dayVotes = new Map();
 
-  room.afterReactive = room.dayNumber === 1 ? 'campaign_wrap' : 'to_discussion';
+  if (room.dayNumber === 1) {
+    // The Day-1 campaign is a "before anything is known" ritual — nothing
+    // from night 1 should be revealed or acted on before it, including a
+    // Hunter's own death and revenge shot. So unlike every later day, don't
+    // wait on the reactive gate (pendingHunterShots) here: start the
+    // campaign immediately. Any pending hunter shot stays queued and is
+    // deferred until concludeCampaign() explicitly lets it through.
+    startCampaign(room);
+    return;
+  }
+  room.afterReactive = 'to_discussion';
   trySettleReactive(room);
 }
 
@@ -510,10 +526,9 @@ function trySettleReactive(room) {
   room.afterReactive = null;
   if (!action) return;
 
-  if (action === 'campaign_wrap' || action === 'to_discussion') {
+  if (action === 'to_discussion') {
     if (checkWinCondition(room)) { logNightDeathsPlain(room); return; }
-    if (action === 'campaign_wrap') startCampaign(room);
-    else revealNightAndEnterAnnounce(room);
+    revealNightAndEnterAnnounce(room);
     return;
   }
   if (action === 'to_next_night_after_vote' || action === 'to_night_knight') {
@@ -602,6 +617,14 @@ function concludeCampaign(room) {
     log(room, 'No one ran for Sheriff. There is no Sheriff this game.');
   }
   room.campaign = null;
+  // A Hunter who died on night 1 has been sitting on a queued revenge shot
+  // this whole time, deliberately held back from resolving until now (see
+  // resolveNight). Its original deadline was set assuming it would resolve
+  // right away, so refresh it here to give the Hunter a fair window instead
+  // of it having already silently expired during the campaign.
+  if (room.pendingHunterShots.length > 0) {
+    room.pendingHunterShots[0].deadline = Date.now() + room.timers.nightAction * 1000;
+  }
   room.afterReactive = 'to_discussion';
   trySettleReactive(room);
 }
@@ -910,7 +933,9 @@ function tickOnce(room) {
     resolveSheriffHandoff(room, null);
     return true;
   }
-  if (room.pendingHunterShots.length > 0 && now > room.pendingHunterShots[0].deadline) {
+  // Deferred while the Day-1 campaign is still running (room.campaign is
+  // only non-null during that window) — see resolveNight/concludeCampaign.
+  if (!room.campaign && room.pendingHunterShots.length > 0 && now > room.pendingHunterShots[0].deadline) {
     resolveHunterShot(room, room.pendingHunterShots[0].hunterId, null);
     return true;
   }
@@ -1046,6 +1071,16 @@ function buildPlayerView(room, player) {
     view.hunterNightStatus = { known: true, canFire: room.hunterNightStatus.get(player.id) };
   }
 
+  // Deliberately NOT gated on room.phase === 'night' or on nightSubPhase — a
+  // minimal game (e.g. just a Seer + wolves, no Guard/Witch) can finish
+  // resolving the whole night synchronously within the Seer's own check
+  // request, moving straight to the day before the client's next poll. This
+  // keeps the result visible for the rest of that night AND the following
+  // day, only clearing when the next night's beginNight() resets it.
+  if (player.role === 'Seer' && room.seerResult) {
+    view.seerLastResult = room.seerResult;
+  }
+
   if (room.phase === 'night' && player.alive) {
     if (room.nightSubPhase === 'guard' && player.role === 'Guard') {
       view.guardPhase = {
@@ -1130,7 +1165,8 @@ function buildPlayerView(room, player) {
     if (c.subPhase === 'vote') {
       view.campaign.candidates = c.candidateIds.map((id) => ({ id, name: getPlayer(room, id)?.name }));
       view.campaign.yourVote = c.votes.get(player.id) || null;
-      view.campaign.canVote = player.publicAlive;
+      // Candidates don't get a vote in their own election.
+      view.campaign.canVote = player.publicAlive && !iAmCandidate;
     }
   }
 
@@ -1138,7 +1174,9 @@ function buildPlayerView(room, player) {
     view.announcement = room.lastAnnouncement;
   }
 
-  if (room.pendingHunterShots[0]?.hunterId === player.id) {
+  // Held back while room.campaign is still active — the Day-1 campaign must
+  // run undisturbed before a Hunter's own death/revenge shot is ever exposed.
+  if (!room.campaign && room.pendingHunterShots[0]?.hunterId === player.id) {
     view.hunterShot = {
       active: true, secondsLeft: secondsLeft(room.pendingHunterShots[0].deadline),
       candidates: alivePlayers(room).filter((p) => p.id !== player.id).map((p) => ({ id: p.id, name: p.name })),
@@ -1194,7 +1232,10 @@ function buildPlayerView(room, player) {
     if (player.canVote === false) {
       view.dayVoteBlocked = true;
     } else {
-      const counts = tallyDayVotes(room);
+      // No live tally here on purpose — showing a running "who's leading"
+      // count while voting is still open lets people bandwagon onto whoever
+      // is already ahead, or read off who voted for whom from the shifting
+      // numbers. Only the vote-count-so-far (not the breakdown) is shown.
       view.dayVote = {
         candidates: alivePlayers(room).filter((p) => p.id !== player.id).map((p) => ({ id: p.id, name: p.name })),
         yourVote: room.dayVotes.get(player.id) || null,
@@ -1202,7 +1243,6 @@ function buildPlayerView(room, player) {
         votedCount: room.dayVotes.size,
         totalVoters: votingEligible(room).length,
         secondsLeft: secondsLeft(room.voteDeadline),
-        tally: [...counts.entries()].map(([id, weight]) => ({ id, name: getPlayer(room, id)?.name, weight })),
       };
     }
   }
@@ -1453,6 +1493,7 @@ const actions = {
     // identifies them as a wolf via isWolfRole/ROLE_DEFS.team as normal.
     const apparentTeam = target.role === 'HiddenWolf' ? 'village' : ROLE_DEFS[target.role].team;
     const result = { name: target.name, team: apparentTeam };
+    room.seerResult = result; // persisted so a page reload doesn't lose it
     log(room, `${player.name} (Seer) looked at ${target.name}.`, { secret: true });
     advanceNightSubPhase(room);
     return { ok: true, result };
@@ -1514,9 +1555,12 @@ const actions = {
     const { room, player } = ctx;
     if (room.phase !== 'campaign' || room.campaign.subPhase !== 'vote' || !player.publicAlive) return { ok: false, error: 'Voting is not open.' };
     const c = room.campaign;
+    // Candidates don't get a vote in their own election.
+    if (c.candidateIds.includes(player.id)) return { ok: false, error: 'Candidates cannot vote in their own election.' };
     if (!c.candidateIds.includes(body.targetId)) return { ok: false, error: 'Invalid candidate.' };
     c.votes.set(player.id, body.targetId);
-    if (c.votes.size >= publicAlivePlayers(room).length) concludeCampaign(room);
+    const eligibleVoters = publicAlivePlayers(room).filter((p) => !c.candidateIds.includes(p.id));
+    if (c.votes.size >= eligibleVoters.length) concludeCampaign(room);
     return { ok: true };
   },
 
@@ -1525,6 +1569,7 @@ const actions = {
     const ctx = requirePlayer(body);
     if (!ctx) return { ok: false, error: 'Not found.' };
     const { room, player } = ctx;
+    if (room.campaign) return { ok: false, error: 'The Sheriff campaign must finish first.' };
     if (room.pendingHunterShots[0]?.hunterId !== player.id) return { ok: false, error: 'You cannot fire right now.' };
     const target = getPlayer(room, body.targetId);
     if (!target || !target.alive) return { ok: false, error: 'Invalid target.' };

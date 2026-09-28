@@ -38,6 +38,20 @@ exception: they don't know who the other wolves are, and the other wolves
 don't know about them either — the concealment runs both ways, so this
 marker never appears for or about a Hidden Wolf.
 
+## Small quality-of-life touches
+
+- **Every player's role card, with its full ability description, stays on
+  screen for the whole game** once revealed — no one has to remember what
+  their role does from a single glance at the start.
+- **The Seer's nightly result is never lost.** It shows as a small banner
+  right under their role card for the rest of that night and the following
+  day (not just for an instant right after they check someone), and it's
+  served from the game state itself rather than a one-off response, so it
+  survives a page reload or a phone locking and reopening the tab.
+- **A phase-change sound cue** plays a short chime whenever the game moves
+  forward (a new phase, a new night sub-phase, a new speaker) — a small
+  🔔/🔕 toggle next to the room code lets each player mute it for themselves.
+
 ## Playing online — quick rundown
 
 1. One person opens the app, taps **Create a Game**, and enters their name.
@@ -228,6 +242,17 @@ defaults. All are easy to change — just say so and I'll adjust the code:
 - Not voting, not using a night ability, and not ending your speech turn
   early are all fine — every one of those has its own timer and a defined
   no-op outcome if time runs out.
+- **The Day-1 Sheriff campaign always runs first, completely undisturbed** —
+  nothing from night 1 is acted on before it, not even a Hunter's own death
+  and revenge shot. If the wolves kill the Hunter on night 1, their shot
+  stays queued and only becomes available once the campaign has fully
+  concluded; it's never fired (by them or by a timeout) beforehand.
+- **Candidates don't get a vote in their own Sheriff election** — only
+  non-candidates vote, and the "everyone's voted" fast-forward only counts
+  those eligible voters.
+- **A live day-vote tally is never shown while voting is still open** — you
+  can see your own pick and how many people have voted so far, but not the
+  breakdown, so no one can bandwagon onto whoever's currently ahead.
 - If the sitting **Sheriff dies**, it's the dying Sheriff themselves — not
   anyone else — who's prompted (once the death is revealed) to hand the
   badge to someone else or retire it for the rest of the game.

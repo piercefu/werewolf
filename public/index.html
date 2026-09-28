@@ -197,6 +197,55 @@
   let showRulesModal = false;
   let rolesInfo = null;          // cached /api/roles response
 
+  // --- phase-change sound cue ---
+  let soundOn = true;
+  try { soundOn = localStorage.getItem('ww_sound') !== 'off'; } catch (e) {}
+  let audioCtx = null;
+  let lastStepKey = null;        // last-seen phase/sub-phase "step", to detect transitions
+  function ensureAudioCtx() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* unsupported */ }
+    }
+    return audioCtx;
+  }
+  // Browsers block audio until a user gesture unlocks it — any tap anywhere
+  // in the app is enough, since players are constantly tapping buttons.
+  document.addEventListener('click', () => {
+    const ctx = ensureAudioCtx();
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+  });
+  function playChime() {
+    if (!soundOn) return;
+    const ctx = ensureAudioCtx();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') { ctx.resume().catch(() => {}); return; } // no gesture yet this tick, skip silently
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+    gain.connect(ctx.destination);
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(740, now);
+    osc.frequency.exponentialRampToValueAtTime(520, now + 0.35);
+    osc.connect(gain);
+    osc.start(now);
+    osc.stop(now + 0.4);
+  }
+  function stepKeyFor(v) {
+    if (!v) return null;
+    return [
+      v.phase, v.nightSubPhase || '', (v.discussion && v.discussion.speakerId) || '',
+      (v.campaign && v.campaign.subPhase) || '', v.voteCountdown ? 'vc' : '',
+    ].join('|');
+  }
+  function toggleSound() {
+    soundOn = !soundOn;
+    try { localStorage.setItem('ww_sound', soundOn ? 'on' : 'off'); } catch (e) {}
+    render();
+  }
+
   function loadSession() {
     try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e) { return null; }
   }
@@ -263,6 +312,12 @@
       const data = await res.json();
       if (data.ok) {
         view = data.view;
+        const newKey = stepKeyFor(view);
+        // Only chime on a genuine transition, and never on the very first
+        // view we ever load (lastStepKey starts null) — that would chime
+        // just for opening the app.
+        if (lastStepKey !== null && newKey !== lastStepKey && view.phase !== 'lobby') playChime();
+        lastStepKey = newKey;
       } else {
         view = null;
         clearSession();
@@ -495,6 +550,7 @@
         <div class="row" style="align-items:center">
           ${view.you.isSheriff ? '<span class="pill sheriff">🎖️ Sheriff</span>' : ''}
           ${view.you.isLobbyLeader ? '<span class="pill leader">★ Leader</span>' : ''}
+          <button class="icon-btn small" id="btn-sound" title="${soundOn ? 'Mute phase-change sound' : 'Unmute phase-change sound'}">${soundOn ? '🔔' : '🔕'}</button>
           <button class="icon-btn small" id="btn-rules">📖</button>
         </div>
       </div>
@@ -508,6 +564,7 @@
       html += renderReactivePrompts(view);
     } else {
       html += renderRoleCard(view.you);
+      if (view.seerLastResult) html += renderSeerLastResult(view.seerLastResult);
       html += renderReactivePrompts(view);
       html += renderPhaseBody(view);
     }
@@ -518,6 +575,7 @@
     }
     $app.innerHTML = html;
     document.getElementById('btn-rules').onclick = openRulesModal;
+    if (document.getElementById('btn-sound')) document.getElementById('btn-sound').onclick = toggleSound;
     wireControls(view);
   }
 
@@ -649,7 +707,12 @@
 
   function renderCampaignBody(view) {
     const c = view.campaign;
-    if (!c) return '';
+    if (!c) {
+      // Briefly true right after the campaign concludes but before the game
+      // has moved on — e.g. a Hunter who died night 1 is still resolving
+      // their deferred revenge shot before anything can be revealed.
+      return `<div class="card center"><p>🗳️ The campaign has concluded.</p><p class="tiny">Wrapping up the night before anything is revealed…</p></div>`;
+    }
     let html = '<div class="card"><h3>🗳️ Sheriff campaign</h3>';
     html += `<p class="tiny">Nothing about last night has been revealed yet — the campaign happens first.</p>`;
     if (c.subPhase === 'nominate') {
@@ -673,6 +736,8 @@
           html += `<button class="choicebtn${sel}" data-pid="${cand.id}">${esc(cand.name)}</button>`;
         }
         html += '</div>';
+      } else if (c.youAreCandidate) {
+        html += `<p>You\'re running, so you don\'t get a vote in your own election.</p>`;
       } else {
         html += `<p>You can\'t vote right now.</p>`;
       }
@@ -769,11 +834,11 @@
     const sp = view.seerPhase;
     let html = `<div class="card"><h3>🔮 Look into someone\'s soul</h3><div class="tiny">${sp.secondsLeft}s left</div>`;
     if (sp.acted) {
+      // The actual result now renders as a persistent banner right under your
+      // role card (view.seerLastResult, wired in the main render() function)
+      // so it survives the sub-phase auto-advancing and lasts the rest of the
+      // night and the following day — it's not repeated here.
       html += `<p>You\'ve made your choice. Waiting on the rest of the night…</p>`;
-      if (window.__seerResult) {
-        const r = window.__seerResult;
-        html += `<div class="banner">${esc(r.name)} is on the <b>${r.team === 'wolf' ? 'Werewolf' : 'Village'}</b> team.</div>`;
-      }
     } else {
       html += '<div class="stack" id="seer-choices">';
       for (const c of sp.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${esc(c.name)}</button>`;
@@ -862,13 +927,6 @@
       html += `<button class="choicebtn${sel}" data-pid="${c.id}">${esc(c.name)}</button>`;
     }
     html += '</div>';
-    if (dv.tally && dv.tally.length) {
-      html += '<div class="divider"></div><div class="stack">';
-      for (const t of dv.tally.slice().sort((a,b)=>b.weight-a.weight)) {
-        html += `<div class="flex-between tiny"><span>${esc(t.name)}</span><b>${t.weight}</b></div>`;
-      }
-      html += '</div>';
-    }
     html += '</div>';
     return html;
   }
@@ -886,6 +944,10 @@
     }
     html += '</div>';
     return html;
+  }
+
+  function renderSeerLastResult(r) {
+    return `<div class="banner">🔮 You checked <b>${esc(r.name)}</b>: they are on the <b>${r.team === 'wolf' ? 'Werewolf' : 'Village'}</b> team.</div>`;
   }
 
   function renderPlayersCard(view, opts) {
@@ -986,7 +1048,9 @@
       el.onclick = () => doAction('player/wolfVote', authBody({ targetId: el.dataset.pid }));
     });
     document.querySelectorAll('#seer-choices [data-pid]').forEach((el) => {
-      el.onclick = () => doAction('player/seerView', authBody({ targetId: el.dataset.pid }), { onResult: (r) => { window.__seerResult = r.result; } });
+      // The result now comes back through the regular state poll (view.seerPhase.result),
+      // persisted server-side, so no need to stash the one-shot API response anymore.
+      el.onclick = () => doAction('player/seerView', authBody({ targetId: el.dataset.pid }));
     });
     if (b('btn-witch-heal')) b('btn-witch-heal').onclick = () => doAction('player/witchAction', authBody({ action: 'heal' }));
     if (b('btn-witch-skip')) b('btn-witch-skip').onclick = () => doAction('player/witchAction', authBody({ action: 'skip' }));
