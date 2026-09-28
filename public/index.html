@@ -838,6 +838,9 @@
     }
     let html = '<div class="card"><h3>🗳️ Sheriff campaign</h3>';
     html += `<p class="tiny">Nothing about last night has been revealed yet — the campaign happens first.</p>`;
+    if (c.isRunoff && (c.subPhase === 'speeches' || c.subPhase === 'vote')) {
+      html += `<div class="banner" style="margin-bottom:8px">⚖️ Tie! Runoff between ${esc(c.candidateNames.join(' and '))} — a second tie means no Sheriff this game.</div>`;
+    }
     if (c.subPhase === 'nominate') {
       html += `<p>Running so far: ${c.candidateNames.length ? esc(c.candidateNames.join(', ')) : '(no one yet)'}</p>`;
       html += `<p class="countdown center" style="font-size:1.3rem">${c.secondsLeft}s</p>`;
@@ -883,6 +886,10 @@
     let html = `<div class="card"><div class="stack">` + (view.announcement || []).map((a) => `<p style="color:var(--text)">${esc(a)}</p>`).join('') + `</div></div>`;
     const d = view.discussion;
     if (d) {
+      if (d.isRunoff) {
+        const tiedNames = d.queue.map((id) => nameOf(id)).join(' and ');
+        html += `<div class="card"><div class="banner">⚖️ Tie! ${esc(tiedNames)} get one final word before the runoff vote.</div></div>`;
+      }
       const dirTxt = dirArrowFor(d.direction) ? ` ${dirArrowFor(d.direction)}` : '';
       html += `<div class="card speaker-highlight${d.isYourTurn ? ' your-turn' : ''}"><div class="tiny">${d.isYourTurn ? '🎤 YOUR TURN' : 'Now speaking'}${dirTxt}</div><div class="who">${esc(nameOf(d.currentSpeakerId))}</div><div class="countdown">${d.secondsLeft}s</div><div class="tiny" style="margin-top:6px">${d.pointer + 1} / ${d.queue.length}</div></div>`;
       if (d.isYourTurn) html += `<div class="card"><button id="btn-finish-speech">✅ I\'m done speaking</button></div>`;
@@ -893,7 +900,8 @@
   }
 
   function renderVoteCountdownBody(view) {
-    return `<div class="card center"><h2>Get ready to vote…</h2><div class="countdown" style="font-size:2rem">${view.voteCountdown ? view.voteCountdown.secondsLeft : ''}s</div></div>`;
+    const heading = view.voteCountdown && view.voteCountdown.isRunoff ? 'Get ready for the runoff vote…' : 'Get ready to vote…';
+    return `<div class="card center"><h2>${heading}</h2><div class="countdown" style="font-size:2rem">${view.voteCountdown ? view.voteCountdown.secondsLeft : ''}s</div></div>`;
   }
 
   function renderDayVoteBody(view) {
@@ -1055,7 +1063,11 @@
   }
   function renderDayVoteUI(view) {
     const dv = view.dayVote;
-    let html = `<div class="card"><h3>☀️ Vote to eliminate</h3><div class="tiny">${dv.secondsLeft}s left</div>`;
+    const title = dv.isRunoff ? '⚖️ Runoff vote' : '☀️ Vote to eliminate';
+    let html = `<div class="card"><h3>${title}</h3><div class="tiny">${dv.secondsLeft}s left</div>`;
+    if (dv.isRunoff) {
+      html += `<p class="tiny">It was a tie — vote again between ${esc((dv.tiedNames || []).join(' and '))}. A second tie means no one is eliminated today.</p>`;
+    }
     html += `<p class="tiny">${dv.votedCount}/${dv.totalVoters} voted (or abstained) · your vote is worth ${dv.youWeight}x</p>`;
     html += '<div class="stack" id="vote-choices">';
     for (const c of dv.candidates) {

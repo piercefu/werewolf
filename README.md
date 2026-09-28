@@ -80,6 +80,19 @@ marker never appears for or about a Hidden Wolf.
   own role still only follows that setting, and a Knight's wrongly-accused
   duel target stays fully hidden (only "innocent" is proven, not their exact
   role) — only a duel that actually catches a werewolf reveals the target.
+- **Anyone who dies during the day** — executed by vote, shot by the Hunter,
+  or on either end of a Knight's duel — gets one final "last words" speech
+  turn before the game moves on, just like the table would let them speak
+  before being led away in person. A night death never gets this; it's only
+  discovered (and never explained) the next morning.
+- **A tied day vote or Sheriff election isn't a coin flip.** The tied players
+  get one more speech turn, then the village votes again among just them —
+  see "House-rule choices" below for what happens if that runoff ties too.
+- **A "Leave this game" button** (🚪, next to the room code) clears your
+  saved session and returns you to the main menu, so you can back out of a
+  game without clearing your browser's cookies/site data. Opening a fresh
+  invite link for a different room also now correctly starts a new game
+  instead of silently reconnecting you to whatever room you were in before.
 
 ## Playing online — quick rundown
 
@@ -115,7 +128,10 @@ into a live campaign round:
    a turn to make their case (the `speech` timer per turn). With zero or
    one candidate, this step is skipped.
 3. **Vote** — everyone votes for a candidate (the `electionVote` timer).
-   Highest vote count wins the badge; ties broken at random.
+   Highest vote count wins the badge. A tie triggers a **runoff**: the tied
+   candidates each get one more speech turn, then the village votes again
+   among just them. If that runoff ties too, there's no Sheriff this game —
+   no coin flip, no third round.
 
 This round is deliberately separate from the rest of the day — it's
 sometimes called "day 0." Since no one's death has been announced yet, a
@@ -250,9 +266,14 @@ starting:
 The game has a lot of table-to-table variation, so I had to pick some
 defaults. All are easy to change — just say so and I'll adjust the code:
 
-- **Tie-breaks** (wolves' kill vote, day elimination vote, and the Sheriff
-  election) are broken by random pick among the tied players, rather than
-  "no kill" or a re-vote.
+- **The wolves' night kill vote** breaks a tie by random pick among the tied
+  targets — it's a hidden vote with no discussion possible in the moment, so
+  a runoff isn't practical there the way it is during the day.
+- **The day elimination vote and the Sheriff election** do NOT break ties at
+  random. A tie triggers one **runoff**: the tied players get one more
+  speech turn, then everyone votes again among just them. A second tie in
+  that runoff means nothing happens — no one is eliminated / there's no
+  Sheriff this game — rather than a third round or a coin flip.
 - **Reveal role on death** defaults to on (a lobby toggle turns it off if
   you'd rather keep roles secret until the game ends).
 - The **Witch** can target herself with either potion, and can poison any

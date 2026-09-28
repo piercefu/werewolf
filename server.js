@@ -258,6 +258,12 @@ function newRoom(code) {
     // --- day vote ---
     dayVotes: new Map(),
     voteDeadline: null,
+    // Non-null only while a tied execution vote is being broken: the tied
+    // players get one more speech turn (a mini day_discussion, reusing the
+    // normal discussion machinery) and then a runoff vote restricted to just
+    // them. {candidateIds: [playerId]} | null. Cleared the moment the runoff
+    // itself resolves (elimination or a second tie). See resolveDayVote().
+    dayVoteTie: null,
 
     // --- vote-result toast (day elimination vote + Sheriff election) ---
     // Deliberately phase-independent and NEVER reset by beginNight/etc — unlike
@@ -484,6 +490,7 @@ function resetGame(room) {
   room.voteCountdownDeadline = null;
   room.dayVotes = new Map();
   room.voteDeadline = null;
+  room.dayVoteTie = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -503,6 +510,7 @@ function beginNight(room) {
   room.poisonTargetId = null;
   room.lastNightDeaths = [];
   room.hunterNightStatus = new Map();
+  room.dayVoteTie = null; // should already be null by now — defensive reset, same as pendingLastWords
   advanceNightSubPhase(room, true);
 }
 
@@ -666,6 +674,10 @@ function startCampaign(room) {
     speechDeadline: null,
     votes: new Map(),
     voteDeadline: null,
+    // Set once a tied election forces a runoff (tied candidates speak once
+    // more, then re-vote among just themselves) — see startCampaignRunoff().
+    // A second tie in the runoff means no Sheriff, rather than looping again.
+    runoff: false,
   };
   log(room, 'Before anything else, the village holds a Sheriff campaign.');
 }
@@ -692,10 +704,30 @@ function campaignAdvanceSpeech(room) {
     c.subPhase = 'vote';
     c.votes = new Map();
     c.voteDeadline = Date.now() + room.timers.electionVote * 1000;
-    log(room, 'Campaign speeches are done. The village votes for Sheriff.');
+    log(room, c.runoff ? 'Runoff speeches are done. The village votes again.' : 'Campaign speeches are done. The village votes for Sheriff.');
   } else {
     c.speechDeadline = Date.now() + room.timers.speech * 1000;
   }
+}
+
+// A tied election isn't settled by a coin flip: the tied candidates get one
+// more speech turn (reusing the exact same speech-queue machinery as the
+// first round, just restricted to them) and then the village votes again,
+// choosing only among them. c.candidateIds is narrowed to the tied set, so
+// anyone who was in the race but NOT tied for the lead simply becomes an
+// ordinary voter in the runoff — same as if they'd never run.
+function startCampaignRunoff(room, tiedIds) {
+  const c = room.campaign;
+  c.runoff = true;
+  c.candidateIds = tiedIds;
+  c.subPhase = 'speeches';
+  const startId = pickRandom(tiedIds);
+  const direction = Math.random() < 0.5 ? 'left' : 'right';
+  c.speechQueue = buildRotation(room, startId, direction, (p) => p && tiedIds.includes(p.id));
+  c.speechPointer = 0;
+  c.speechDeadline = Date.now() + room.timers.speech * 1000;
+  c.votes = new Map();
+  log(room, `${tiedIds.length} tied candidates speak once more before the runoff vote.`);
 }
 
 function concludeCampaign(room) {
@@ -711,17 +743,34 @@ function concludeCampaign(room) {
       if (targetId === ABSTAIN) continue; // counts toward "everyone has acted", not toward any candidate's tally
       counts.set(targetId, (counts.get(targetId) || 0) + 1);
     }
+    const breakdown = buildCampaignVoteBreakdown(room);
     if (counts.size > 0) {
       let max = -1;
       for (const v of counts.values()) max = Math.max(max, v);
       const top = [...counts.entries()].filter(([, v]) => v === max).map(([id]) => id);
-      room.sheriffId = pickRandom(top);
-      const msg = `${getPlayer(room, room.sheriffId)?.name} is elected Sheriff.`;
-      log(room, msg);
-      fireVoteResultEvent(room, 'sheriff', `🎖️ ${msg}`, buildCampaignVoteBreakdown(room));
+      if (top.length > 1) {
+        const names = top.map((id) => getPlayer(room, id)?.name).filter(Boolean).join(' and ');
+        if (c.runoff) {
+          // Tied twice in a row: no coin flip, no Sheriff this game.
+          log(room, `The runoff vote for Sheriff tied again, between ${names}. There is no Sheriff this game.`);
+          fireVoteResultEvent(room, 'sheriff', `🎖️ The runoff tied again, between ${names}. There is no Sheriff this game.`, breakdown);
+        } else {
+          log(room, `The Sheriff election is tied between ${names}. They'll speak once more, then the village votes again.`);
+          fireVoteResultEvent(room, 'sheriff', `🎖️ Tied between ${names}! One more round of speeches, then a runoff vote.`, breakdown);
+          startCampaignRunoff(room, top);
+          return; // stay in the campaign — the runoff isn't done yet
+        }
+      } else {
+        room.sheriffId = top[0];
+        const msg = c.runoff
+          ? `The runoff vote breaks the tie — ${getPlayer(room, room.sheriffId)?.name} is elected Sheriff.`
+          : `${getPlayer(room, room.sheriffId)?.name} is elected Sheriff.`;
+        log(room, msg);
+        fireVoteResultEvent(room, 'sheriff', `🎖️ ${msg}`, breakdown);
+      }
     } else {
       log(room, 'No votes were cast. There is no Sheriff this game.');
-      fireVoteResultEvent(room, 'sheriff', '🎖️ No votes were cast. There is no Sheriff this game.', buildCampaignVoteBreakdown(room));
+      fireVoteResultEvent(room, 'sheriff', '🎖️ No votes were cast. There is no Sheriff this game.', breakdown);
     }
   } else {
     log(room, 'No one ran for Sheriff. There is no Sheriff this game.');
@@ -935,6 +984,26 @@ function tallyDayVotes(room) {
   return counts;
 }
 
+// A tied execution vote isn't broken by a coin flip: the tied players get
+// one more speech turn — reusing the normal day_discussion machinery,
+// restricted to just them — and then everyone votes again, choosing only
+// among them. Mirrors startCampaignRunoff()'s approach for a tied election.
+function startDayVoteRunoff(room, tiedIds) {
+  room.dayVoteTie = { candidateIds: tiedIds };
+  const aliveTied = tiedIds.filter((id) => getPlayer(room, id)?.alive);
+  if (aliveTied.length === 0) {
+    // Safety net — shouldn't happen, since they were just valid vote targets.
+    room.dayVoteTie = null;
+    startNextNight(room);
+    return;
+  }
+  const startId = pickRandom(aliveTied);
+  const direction = Math.random() < 0.5 ? 'left' : 'right';
+  const queue = buildRotation(room, startId, direction, (p) => p && p.alive && tiedIds.includes(p.id));
+  log(room, `${tiedIds.length} tied players get one more word before the runoff vote.`);
+  startDiscussion(room, queue, direction);
+}
+
 function resolveDayVote(room) {
   // Clear this immediately (before any reactive gate — hunter shot / sheriff
   // handoff — might stall the actual phase transition below). Otherwise the
@@ -953,13 +1022,35 @@ function resolveDayVote(room) {
     log(room, 'No votes were cast. No one is eliminated today.');
     room.lastAnnouncement = ['No votes were cast — no one is eliminated.'];
     fireVoteResultEvent(room, 'day_vote', '🗳️ No votes were cast — no one is eliminated.', breakdown);
+    room.dayVoteTie = null;
     startNextNight(room);
     return;
   }
   let max = -1;
   for (const c of counts.values()) max = Math.max(max, c);
   const top = [...counts.entries()].filter(([, c]) => c === max).map(([id]) => id);
-  const eliminatedId = pickRandom(top);
+
+  if (top.length > 1) {
+    const names = top.map((id) => getPlayer(room, id)?.name).filter(Boolean).join(' and ');
+    if (room.dayVoteTie) {
+      // Tied twice in a row: no coin flip, no elimination today.
+      log(room, `The runoff vote tied again, between ${names}. No one is eliminated today.`);
+      room.lastAnnouncement = [`The runoff vote tied again (${names}) — no one is eliminated.`];
+      fireVoteResultEvent(room, 'day_vote', `🗳️ The runoff tied again, between ${names}. No one is eliminated today.`, breakdown);
+      room.dayVoteTie = null;
+      startNextNight(room);
+      return;
+    }
+    log(room, `The vote is tied between ${names}. They'll speak once more, then the village votes again.`);
+    room.lastAnnouncement = [`Tied between ${names} — one more round of speeches, then a runoff vote.`];
+    fireVoteResultEvent(room, 'day_vote', `🗳️ Tied between ${names}! One more round of speeches, then a runoff vote.`, breakdown);
+    startDayVoteRunoff(room, top);
+    return;
+  }
+
+  const wasRunoff = !!room.dayVoteTie;
+  room.dayVoteTie = null;
+  const eliminatedId = top[0];
   const p = getPlayer(room, eliminatedId);
 
   if (p.role === 'Fool' && !p.foolRevealed) {
@@ -983,7 +1074,9 @@ function resolveDayVote(room) {
 
   applyDeaths(room, [{ id: eliminatedId, cause: 'day_vote' }], { announceImmediately: true });
   const roleNote = room.revealRoleOnDeath ? ` They were the ${ROLE_DEFS[p.role].label}.` : '';
-  const msg = `The village voted to eliminate ${p.name}.${roleNote}`;
+  const msg = wasRunoff
+    ? `The runoff vote breaks the tie — the village voted to eliminate ${p.name}.${roleNote}`
+    : `The village voted to eliminate ${p.name}.${roleNote}`;
   log(room, msg);
   room.lastAnnouncement = [msg];
   fireVoteResultEvent(room, 'day_vote', `🗳️ ${msg}`, breakdown);
@@ -1293,6 +1386,10 @@ function buildPlayerView(room, player) {
       candidateIds: c.candidateIds,
       candidateNames: c.candidateIds.map((id) => getPlayer(room, id)?.name),
       youAreCandidate: iAmCandidate,
+      // True once a tied election has forced a runoff — candidateIds/queue/
+      // candidates are already narrowed to just the tied players by then, so
+      // the client just needs this to explain WHY it's looping back.
+      isRunoff: !!c.runoff,
       secondsLeft: c.subPhase === 'nominate' ? secondsLeft(c.deadline) : c.subPhase === 'speeches' ? secondsLeft(c.speechDeadline) : secondsLeft(c.voteDeadline),
     };
     if (c.subPhase === 'nominate') {
@@ -1372,6 +1469,10 @@ function buildPlayerView(room, player) {
       // 'left' walks it upward (wrapping to the bottom). Sent so the UI can
       // show an explicit arrow instead of making players infer direction.
       direction: dsc.direction || null,
+      // True for the tied players' one extra speech turn before a runoff
+      // execution vote — see startDayVoteRunoff(). The queue itself is
+      // already narrowed to just the tied players.
+      isRunoff: !!room.dayVoteTie,
     };
     const reactivePending = !reactiveClear(room);
     if (player.alive && !reactivePending) {
@@ -1385,7 +1486,7 @@ function buildPlayerView(room, player) {
   }
 
   if (room.phase === 'day_vote_countdown') {
-    view.voteCountdown = { secondsLeft: secondsLeft(room.voteCountdownDeadline) };
+    view.voteCountdown = { secondsLeft: secondsLeft(room.voteCountdownDeadline), isRunoff: !!room.dayVoteTie };
   }
 
   if (room.phase === 'day_vote' && player.alive) {
@@ -1397,14 +1498,25 @@ function buildPlayerView(room, player) {
       // is already ahead, or read off who voted for whom from the shifting
       // numbers. Only the vote-count-so-far (not the breakdown) is shown.
       const myVote = room.dayVotes.get(player.id) || null;
+      // During a runoff, only the tied players are valid choices — everyone
+      // else (including a former non-tied candidate) still votes, just not
+      // for themselves, same as any normal day vote.
+      const candidatePool = room.dayVoteTie
+        ? alivePlayers(room).filter((p) => room.dayVoteTie.candidateIds.includes(p.id))
+        : alivePlayers(room);
       view.dayVote = {
-        candidates: alivePlayers(room).filter((p) => p.id !== player.id).map((p) => ({ id: p.id, name: p.name })),
+        candidates: candidatePool.filter((p) => p.id !== player.id).map((p) => ({ id: p.id, name: p.name })),
         yourVote: myVote === ABSTAIN ? null : myVote,
         yourAbstain: myVote === ABSTAIN,
         youWeight: room.sheriffId === player.id ? 1.5 : 1,
         votedCount: room.dayVotes.size,
         totalVoters: votingEligible(room).length,
         secondsLeft: secondsLeft(room.voteDeadline),
+        isRunoff: !!room.dayVoteTie,
+        // Unlike `candidates` above (which excludes the viewer themselves),
+        // this is the full tied set regardless of who's looking — so a tied
+        // candidate's own screen still names both sides correctly.
+        tiedNames: room.dayVoteTie ? room.dayVoteTie.candidateIds.map((id) => getPlayer(room, id)?.name) : null,
       };
     }
   }
@@ -1873,6 +1985,7 @@ const actions = {
     if (player.canVote === false) return { ok: false, error: 'You have lost your right to vote.' };
     const target = getPlayer(room, body.targetId);
     if (!target || !target.alive || target.id === player.id) return { ok: false, error: 'Invalid target.' };
+    if (room.dayVoteTie && !room.dayVoteTie.candidateIds.includes(target.id)) return { ok: false, error: 'This is a runoff — you can only vote for one of the tied candidates.' };
     room.dayVotes.set(player.id, body.targetId);
     if (room.dayVotes.size >= votingEligible(room).length) resolveDayVote(room);
     return { ok: true };
