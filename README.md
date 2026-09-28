@@ -11,6 +11,12 @@ It has **zero dependencies** — just plain Node.js, nothing to `npm install`.
 That was a deliberate choice to make it as painless as possible to deploy
 without a real dev environment.
 
+## Tests
+
+`npm test` runs the full integration suite (real HTTP calls against a real
+server it starts itself, no mocking) in under a minute. See
+[`tests/README.md`](tests/README.md) for how it works and how to add to it.
+
 ## No host — everyone is a player
 
 There is no separate "moderator" screen and no one who can see more than
@@ -51,6 +57,29 @@ marker never appears for or about a Hidden Wolf.
 - **A phase-change sound cue** plays a short chime whenever the game moves
   forward (a new phase, a new night sub-phase, a new speaker) — a small
   🔔/🔕 toggle next to the room code lets each player mute it for themselves.
+- **When it's specifically YOUR speech turn**, the "Now speaking" card pulses
+  with its own color and a distinct two-note chime (plus a short vibration on
+  phones that support it) — separate from the general phase-change chime, so
+  you don't have to be staring at the screen to notice it's your turn.
+- **A vote result toast.** The instant the day elimination vote or the
+  Sheriff election resolves, a bold banner slides in announcing the outcome
+  and fades out on its own a few seconds later — no need to squint at the log.
+- **The final vote is revealed — like everyone pointing at once in person.**
+  Once a vote is fully locked in, a "who voted for whom" card shows exactly
+  that (including anyone who abstained), and stays up for reference. This is
+  deliberately different from *during* the vote, where no running tally is
+  shown at all (see below) — the reveal only happens after the fact.
+- **Abstain is a real, active choice**, not just "let the timer run out": a
+  dedicated Abstain button on both the day vote and the Sheriff election
+  locks in "I'm not voting" immediately. Once every eligible voter has either
+  voted or abstained, the vote concludes right away instead of the whole
+  table waiting out the clock for one holdout.
+- **The Hunter and the Knight always reveal themselves the instant they act**
+  (firing a shot / dueling), independent of the "reveal role on death"
+  setting — the same way the Werewolf King already did. A Hunter's target's
+  own role still only follows that setting, and a Knight's wrongly-accused
+  duel target stays fully hidden (only "innocent" is proven, not their exact
+  role) — only a duel that actually catches a werewolf reveals the target.
 
 ## Playing online — quick rundown
 
@@ -250,6 +279,15 @@ defaults. All are easy to change — just say so and I'll adjust the code:
 - **Candidates don't get a vote in their own Sheriff election** — only
   non-candidates vote, and the "everyone's voted" fast-forward only counts
   those eligible voters.
+- **No running tally is ever shown while a vote is still open** (day vote or
+  Sheriff election) — no live counts, no partial "who's voted for whom" —
+  specifically to prevent bandwagoning onto whoever's already ahead. Once the
+  vote is fully locked in, the full "who voted for whom" reveal (including
+  abstains) is shown — the same way an in-person table sees everyone point at
+  once, just never mid-count.
+- **Abstain counts toward "everyone's acted"** the same as a real vote does —
+  it just doesn't count toward anyone's tally — so one player choosing to
+  abstain doesn't force the rest of the table to sit out the full timer.
 - **A live day-vote tally is never shown while voting is still open** — you
   can see your own pick and how many people have voted so far, but not the
   breakdown, so no one can bandwagon onto whoever's currently ahead.

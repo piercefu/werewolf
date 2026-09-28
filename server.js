@@ -131,8 +131,27 @@ const DEFAULT_TIMERS = {
   speech: 90,        // max length of a single discussion speech turn
 };
 const TIMER_KEYS = Object.keys(DEFAULT_TIMERS);
-const TIMER_LIMITS = { min: 5, max: 600 };
-const VOTE_COUNTDOWN_SECONDS = 10; // fixed, short "get ready" pause before voting opens
+// Test-only speed override. Never set in production (Render doesn't set it):
+// when WW_FAST_TIMERS is present, the 5s-per-timer floor and the fixed vote
+// countdown collapse to near-instant values, so an integration test can play
+// a full multi-phase game in real seconds instead of real minutes. Nothing
+// about game LOGIC changes — lobby-configured timer values still work
+// exactly the same way, this only lowers what's allowed as a minimum/fixed
+// constant. See tests/README.md.
+const FAST_TIMERS = !!process.env.WW_FAST_TIMERS;
+const TIMER_LIMITS = FAST_TIMERS ? { min: 0.2, max: 600 } : { min: 5, max: 600 };
+const VOTE_COUNTDOWN_SECONDS = FAST_TIMERS ? 0.5 : 10; // fixed, short "get ready" pause before voting opens
+// Sentinel stored in room.dayVotes / campaign.votes to mean "actively chose
+// not to vote", distinct from "hasn't acted yet" (simply absent from the
+// Map). Lets a player lock in an abstain and, once every eligible voter has
+// either voted or abstained, the vote concludes immediately instead of
+// everyone having to sit out the full timer for one holdout.
+const ABSTAIN = '__abstain__';
+// Death causes that happen during the DAY (execution, a Hunter's shot,
+// a Knight duel either way, the Werewolf King's reveal) — as opposed to a
+// night kill (wolf/witch, no explicit cause), which is only discovered the
+// next morning and so never gets a "last words" turn. See applyDeaths().
+const DAY_DEATH_CAUSES = new Set(['day_vote', 'hunter', 'knight_duel', 'knight_duel_shame', 'wolfking_reveal']);
 
 function isWolfRole(role) {
   return !!ROLE_DEFS[role] && ROLE_DEFS[role].team === 'wolf';
@@ -220,6 +239,15 @@ function newRoom(code) {
     pendingHunterShots: [], // [{hunterId, deadline}]
     pendingSheriffHandoff: null, // {sheriffId, deadline} | null
     pendingSheriffDirection: null, // {deadline, kind:'death'|'last', leftId, rightId, deceasedId?} | null
+    // A player who died a DAY death (executed by vote, shot by the Hunter,
+    // killed/dying in a Knight duel, or the Werewolf King reveal) gets one
+    // final speech turn before the game moves on — real in-person Werewolf
+    // lets the person being led away say something before the table moves
+    // on, and a night death (found dead in the morning) never gets this.
+    // Queued automatically inside applyDeaths() based on the death's cause,
+    // resolved one at a time (front of the queue), same shape/pattern as
+    // pendingHunterShots.
+    pendingLastWords: [], // [{playerId, deadline}]
     afterReactive: null, // what to do once all of the above are clear: 'to_discussion' | 'to_night' | 'resume_discussion' | 'to_next_night_after_vote'
 
     // --- day discussion state ---
@@ -230,7 +258,67 @@ function newRoom(code) {
     // --- day vote ---
     dayVotes: new Map(),
     voteDeadline: null,
+
+    // --- vote-result toast (day elimination vote + Sheriff election) ---
+    // Deliberately phase-independent and NEVER reset by beginNight/etc — unlike
+    // lastAnnouncement, which the day-vote elimination message flows into and
+    // which gets wiped the instant startNextNight->beginNight runs (often in
+    // the very same tick that resolved the vote, since there's no reactive
+    // gate in between). That meant the elimination message could be set and
+    // cleared before any client poll ever saw it. This field is only ever
+    // overwritten by the next vote result, so the client can reliably catch
+    // it once (via the incrementing id) and show a toast, no matter how fast
+    // the server moves on to the next phase.
+    voteResultEvent: null, // {id, kind:'day_vote'|'sheriff', text, breakdown} | null
+    voteResultSeq: 0,
   };
+}
+
+// Records a vote outcome (day elimination or Sheriff election) as a durable,
+// one-time client event — see voteResultEvent above. `breakdown` (optional)
+// is the real-life "everyone points at once" reveal — who voted for whom,
+// once the vote is fully locked in — as an array of
+// {voterId, voterName, targetId, targetName, candidate?}; targetName is null
+// for an abstainer, and `candidate: true` marks someone who was themselves a
+// candidate and so had no vote to give (not the same thing as abstaining).
+// Deliberately never shown DURING voting (see the removed live tally in
+// buildPlayerView) — only after the vote has already closed.
+function fireVoteResultEvent(room, kind, text, breakdown) {
+  room.voteResultSeq += 1;
+  room.voteResultEvent = { id: room.voteResultSeq, kind, text, breakdown: breakdown || null };
+}
+
+// Snapshot of "who voted for whom" in the day elimination vote, taken at the
+// moment the vote resolves (room.dayVotes is cleared moments later when the
+// game moves into the next night, often in the very same tick).
+function buildDayVoteBreakdown(room) {
+  return votingEligible(room).map((p) => {
+    const raw = room.dayVotes.get(p.id) || null;
+    const abstained = raw === ABSTAIN;
+    const targetId = abstained ? null : raw;
+    return { voterId: p.id, voterName: p.name, targetId, targetName: targetId ? getPlayer(room, targetId)?.name || null : null, abstained };
+  });
+}
+
+// Same idea for the Sheriff election vote, taken before room.campaign is
+// nulled out. Candidates couldn't vote in their own election, so they're
+// listed separately (candidate: true) rather than lumped in as abstainers.
+function buildCampaignVoteBreakdown(room) {
+  const c = room.campaign;
+  const candidateIds = new Set(c.candidateIds);
+  const breakdown = publicAlivePlayers(room)
+    .filter((p) => !candidateIds.has(p.id))
+    .map((p) => {
+      const raw = c.votes.get(p.id) || null;
+      const abstained = raw === ABSTAIN;
+      const targetId = abstained ? null : raw;
+      return { voterId: p.id, voterName: p.name, targetId, targetName: targetId ? getPlayer(room, targetId)?.name || null : null, abstained };
+    });
+  for (const id of c.candidateIds) {
+    const p = getPlayer(room, id);
+    if (p) breakdown.push({ voterId: p.id, voterName: p.name, targetId: null, targetName: null, candidate: true });
+  }
+  return breakdown;
 }
 
 function newPlayer(name) {
@@ -389,6 +477,7 @@ function resetGame(room) {
   room.pendingHunterShots = [];
   room.pendingSheriffHandoff = null;
   room.pendingSheriffDirection = null;
+  room.pendingLastWords = []; // should already be empty by now (day gates all clear before night starts) — defensive reset
   room.afterReactive = null;
   room.lastAnnouncement = [];
   room.discussion = null;
@@ -499,15 +588,28 @@ function applyDeaths(room, deaths, { announceImmediately = false } = {}) {
     if (room.sheriffId === p.id) {
       room.pendingSheriffHandoff = { sheriffId: p.id, deadline: Date.now() + room.timers.nightAction * 1000 };
     }
+    if (DAY_DEATH_CAUSES.has(d.cause)) {
+      room.pendingLastWords.push({ playerId: p.id, deadline: Date.now() + room.timers.speech * 1000 });
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Reactive gate: resolves once pendingHunterShots / pendingSheriffHandoff are
-// both empty, then does whatever `room.afterReactive` says.
+// Reactive gate: resolves once pendingHunterShots / pendingSheriffHandoff /
+// pendingLastWords are all empty, then does whatever `room.afterReactive`
+// says.
 // ---------------------------------------------------------------------------
 function reactiveClear(room) {
-  return room.pendingHunterShots.length === 0 && !room.pendingSheriffHandoff;
+  return room.pendingHunterShots.length === 0 && !room.pendingSheriffHandoff && room.pendingLastWords.length === 0;
+}
+
+// Removes the front-of-queue "last words" entry (the only one that's ever
+// actively speakable — same one-at-a-time pattern as pendingHunterShots) and
+// re-checks whether the game can now proceed.
+function resolveLastWords(room, playerId) {
+  if (room.pendingLastWords[0]?.playerId !== playerId) return;
+  room.pendingLastWords.shift();
+  trySettleReactive(room);
 }
 
 // Safety net: if the game ends the instant a night resolves (before the
@@ -600,21 +702,30 @@ function concludeCampaign(room) {
   const c = room.campaign;
   if (c.candidateIds.length === 1) {
     room.sheriffId = c.candidateIds[0];
-    log(room, `${getPlayer(room, room.sheriffId)?.name} ran unopposed and is the new Sheriff.`);
+    const msg = `${getPlayer(room, room.sheriffId)?.name} ran unopposed and is the new Sheriff.`;
+    log(room, msg);
+    fireVoteResultEvent(room, 'sheriff', `🎖️ ${msg}`);
   } else if (c.candidateIds.length >= 2) {
     const counts = new Map();
-    for (const targetId of c.votes.values()) counts.set(targetId, (counts.get(targetId) || 0) + 1);
+    for (const targetId of c.votes.values()) {
+      if (targetId === ABSTAIN) continue; // counts toward "everyone has acted", not toward any candidate's tally
+      counts.set(targetId, (counts.get(targetId) || 0) + 1);
+    }
     if (counts.size > 0) {
       let max = -1;
       for (const v of counts.values()) max = Math.max(max, v);
       const top = [...counts.entries()].filter(([, v]) => v === max).map(([id]) => id);
       room.sheriffId = pickRandom(top);
-      log(room, `${getPlayer(room, room.sheriffId)?.name} is elected Sheriff.`);
+      const msg = `${getPlayer(room, room.sheriffId)?.name} is elected Sheriff.`;
+      log(room, msg);
+      fireVoteResultEvent(room, 'sheriff', `🎖️ ${msg}`, buildCampaignVoteBreakdown(room));
     } else {
       log(room, 'No votes were cast. There is no Sheriff this game.');
+      fireVoteResultEvent(room, 'sheriff', '🎖️ No votes were cast. There is no Sheriff this game.', buildCampaignVoteBreakdown(room));
     }
   } else {
     log(room, 'No one ran for Sheriff. There is no Sheriff this game.');
+    fireVoteResultEvent(room, 'sheriff', '🎖️ No one ran for Sheriff. There is no Sheriff this game.');
   }
   room.campaign = null;
   // A Hunter who died on night 1 has been sitting on a queued revenge shot
@@ -818,6 +929,7 @@ function tallyDayVotes(room) {
   const weight = (voterId) => (room.sheriffId === voterId ? 1.5 : 1);
   const counts = new Map();
   for (const [voterId, targetId] of room.dayVotes.entries()) {
+    if (targetId === ABSTAIN) continue; // an explicit abstain counts toward "everyone has acted" but not toward anyone's tally
     counts.set(targetId, (counts.get(targetId) || 0) + weight(voterId));
   }
   return counts;
@@ -833,9 +945,14 @@ function resolveDayVote(room) {
   // clearing room.campaign before its own reactive gate.
   room.voteDeadline = null;
   const counts = tallyDayVotes(room);
+  // Snapshot the "who voted for whom" reveal now, before anything below can
+  // mutate a voter's canVote (the Fool-reveal branch does) or room.dayVotes
+  // gets cleared by the next night's beginNight() — often in this same tick.
+  const breakdown = buildDayVoteBreakdown(room);
   if (counts.size === 0) {
     log(room, 'No votes were cast. No one is eliminated today.');
     room.lastAnnouncement = ['No votes were cast — no one is eliminated.'];
+    fireVoteResultEvent(room, 'day_vote', '🗳️ No votes were cast — no one is eliminated.', breakdown);
     startNextNight(room);
     return;
   }
@@ -852,6 +969,7 @@ function resolveDayVote(room) {
     const msg = `${p.name} was voted out — but revealed themselves as the Fool! They survive, but lose their vote for the rest of the game.`;
     log(room, msg);
     room.lastAnnouncement = [msg];
+    fireVoteResultEvent(room, 'day_vote', `🗳️ ${msg}`, breakdown);
     // The Fool survives, but has just permanently lost their vote — if they
     // were holding the sheriff badge, it should hand off just like it would
     // on a death, rather than staying with someone who can no longer vote.
@@ -868,6 +986,7 @@ function resolveDayVote(room) {
   const msg = `The village voted to eliminate ${p.name}.${roleNote}`;
   log(room, msg);
   room.lastAnnouncement = [msg];
+  fireVoteResultEvent(room, 'day_vote', `🗳️ ${msg}`, breakdown);
 
   room.afterReactive = 'to_next_night_after_vote';
   trySettleReactive(room);
@@ -884,6 +1003,15 @@ function resolveHunterShot(room, hunterId, targetId) {
   if (targetId) {
     const target = getPlayer(room, targetId);
     if (target && target.alive) {
+      // Choosing to fire is itself an unmistakable, public act — reveal the
+      // Hunter's own identity the instant they take the shot, the same way
+      // the Knight and Werewolf King reveal themselves by using their own
+      // ability. This is independent of the table's revealRoleOnDeath
+      // setting: with that toggle off, the Hunter's death alone wouldn't
+      // reveal anything, but firing a shot at someone by name obviously
+      // still should.
+      const hunter = getPlayer(room, hunterId);
+      if (hunter) hunter.publiclyRevealed = true;
       applyDeaths(room, [{ id: targetId, cause: 'hunter' }], { announceImmediately: true });
       const roleNote = room.revealRoleOnDeath ? ` They were the ${ROLE_DEFS[target.role].label}.` : '';
       const msg = `The Hunter's last shot kills ${target.name}.${roleNote}`;
@@ -937,6 +1065,10 @@ function tickOnce(room) {
   // only non-null during that window) — see resolveNight/concludeCampaign.
   if (!room.campaign && room.pendingHunterShots.length > 0 && now > room.pendingHunterShots[0].deadline) {
     resolveHunterShot(room, room.pendingHunterShots[0].hunterId, null);
+    return true;
+  }
+  if (room.pendingLastWords.length > 0 && now > room.pendingLastWords[0].deadline) {
+    resolveLastWords(room, room.pendingLastWords[0].playerId);
     return true;
   }
   if (room.afterReactive && reactiveClear(room)) {
@@ -1081,6 +1213,16 @@ function buildPlayerView(room, player) {
     view.seerLastResult = room.seerResult;
   }
 
+  // Deliberately phase-independent, every player, always sent (not gated on
+  // phase or on player.alive) — a vote can resolve straight into the next
+  // night in the same tick it happened (no reactive gate in between), so
+  // there's no reliable phase window to key off of. The client instead
+  // tracks the .id itself and shows a one-shot toast the first time it sees
+  // a new one, regardless of what phase the game has already moved on to.
+  if (room.voteResultEvent) {
+    view.voteResultEvent = room.voteResultEvent;
+  }
+
   if (room.phase === 'night' && player.alive) {
     if (room.nightSubPhase === 'guard' && player.role === 'Guard') {
       view.guardPhase = {
@@ -1164,7 +1306,9 @@ function buildPlayerView(room, player) {
     }
     if (c.subPhase === 'vote') {
       view.campaign.candidates = c.candidateIds.map((id) => ({ id, name: getPlayer(room, id)?.name }));
-      view.campaign.yourVote = c.votes.get(player.id) || null;
+      const myVote = c.votes.get(player.id) || null;
+      view.campaign.yourVote = myVote === ABSTAIN ? null : myVote;
+      view.campaign.yourAbstain = myVote === ABSTAIN;
       // Candidates don't get a vote in their own election.
       view.campaign.canVote = player.publicAlive && !iAmCandidate;
     }
@@ -1197,6 +1341,22 @@ function buildPlayerView(room, player) {
       leftName: d.leftId ? getPlayer(room, d.leftId)?.name : null,
       rightId: d.rightId || null,
       rightName: d.rightId ? getPlayer(room, d.rightId)?.name : null,
+    };
+  }
+  // Unlike the reactive prompts above (private strategic choices, only shown
+  // to the one acting player), last words are a spoken-out-loud moment at
+  // the table — shown to EVERYONE, the same way a discussion speaker is,
+  // so the whole table knows who's currently speaking and isn't left
+  // guessing why the game has paused.
+  if (room.pendingLastWords.length > 0) {
+    const lw = room.pendingLastWords[0];
+    view.lastWords = {
+      active: true,
+      isYourTurn: lw.playerId === player.id,
+      speakerId: lw.playerId,
+      speakerName: getPlayer(room, lw.playerId)?.name,
+      secondsLeft: secondsLeft(lw.deadline),
+      queueLength: room.pendingLastWords.length,
     };
   }
 
@@ -1236,9 +1396,11 @@ function buildPlayerView(room, player) {
       // count while voting is still open lets people bandwagon onto whoever
       // is already ahead, or read off who voted for whom from the shifting
       // numbers. Only the vote-count-so-far (not the breakdown) is shown.
+      const myVote = room.dayVotes.get(player.id) || null;
       view.dayVote = {
         candidates: alivePlayers(room).filter((p) => p.id !== player.id).map((p) => ({ id: p.id, name: p.name })),
-        yourVote: room.dayVotes.get(player.id) || null,
+        yourVote: myVote === ABSTAIN ? null : myVote,
+        yourAbstain: myVote === ABSTAIN,
         youWeight: room.sheriffId === player.id ? 1.5 : 1,
         votedCount: room.dayVotes.size,
         totalVoters: votingEligible(room).length,
@@ -1563,6 +1725,18 @@ const actions = {
     if (c.votes.size >= eligibleVoters.length) concludeCampaign(room);
     return { ok: true };
   },
+  'player/electionVoteAbstain': (body) => {
+    const ctx = requirePlayer(body);
+    if (!ctx) return { ok: false, error: 'Not found.' };
+    const { room, player } = ctx;
+    if (room.phase !== 'campaign' || room.campaign.subPhase !== 'vote' || !player.publicAlive) return { ok: false, error: 'Voting is not open.' };
+    const c = room.campaign;
+    if (c.candidateIds.includes(player.id)) return { ok: false, error: 'Candidates cannot vote in their own election.' };
+    c.votes.set(player.id, ABSTAIN);
+    const eligibleVoters = publicAlivePlayers(room).filter((p) => !c.candidateIds.includes(p.id));
+    if (c.votes.size >= eligibleVoters.length) concludeCampaign(room);
+    return { ok: true };
+  },
 
   // --- reactive prompts ---
   'player/hunterShoot': (body) => {
@@ -1610,6 +1784,14 @@ const actions = {
     discussionAdvance(room);
     return { ok: true };
   },
+  'player/finishLastWords': (body) => {
+    const ctx = requirePlayer(body);
+    if (!ctx) return { ok: false, error: 'Not found.' };
+    const { room, player } = ctx;
+    if (room.pendingLastWords[0]?.playerId !== player.id) return { ok: false, error: 'It is not your turn to speak.' };
+    resolveLastWords(room, player.id);
+    return { ok: true };
+  },
   'player/knightDuel': (body) => {
     const ctx = requirePlayer(body);
     if (!ctx) return { ok: false, error: 'Not found.' };
@@ -1621,10 +1803,17 @@ const actions = {
     if (!target || !target.alive || target.id === player.id) return { ok: false, error: 'Invalid target.' };
 
     player.knightUsed = true;
+    // The Knight always reveals THEMSELVES by dueling — win or lose. The
+    // target's own role is a separate matter: it should only come out if the
+    // duel actually catches a wolf (that's the whole point of the reveal).
+    // A wrongly-accused, innocent target's specific role must stay hidden —
+    // "they were innocent" is all the duel proves about them, and permanently
+    // outing an innocent Seer/Witch/whoever just for being suspected would be
+    // a real information leak the Knight's ability was never meant to cause.
     player.publiclyRevealed = true;
-    target.publiclyRevealed = true;
 
     if (isWolfRole(target.role)) {
+      target.publiclyRevealed = true;
       applyDeaths(room, [{ id: target.id, cause: 'knight_duel' }], { announceImmediately: true });
       const msg = `${player.name} revealed themselves as the Knight and challenged ${target.name} to a duel — they were a Werewolf and have been slain! Night falls immediately.`;
       log(room, msg);
@@ -1685,6 +1874,16 @@ const actions = {
     const target = getPlayer(room, body.targetId);
     if (!target || !target.alive || target.id === player.id) return { ok: false, error: 'Invalid target.' };
     room.dayVotes.set(player.id, body.targetId);
+    if (room.dayVotes.size >= votingEligible(room).length) resolveDayVote(room);
+    return { ok: true };
+  },
+  'player/dayVoteAbstain': (body) => {
+    const ctx = requirePlayer(body);
+    if (!ctx) return { ok: false, error: 'Not found.' };
+    const { room, player } = ctx;
+    if (room.phase !== 'day_vote' || !room.voteDeadline || !player.alive) return { ok: false, error: 'Voting is not open.' };
+    if (player.canVote === false) return { ok: false, error: 'You have lost your right to vote.' };
+    room.dayVotes.set(player.id, ABSTAIN);
     if (room.dayVotes.size >= votingEligible(room).length) resolveDayVote(room);
     return { ok: true };
   },
@@ -1757,5 +1956,5 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Werewolf moderator listening on port ${PORT}`);
+  console.log(`Werewolf moderator listening on port ${PORT}${FAST_TIMERS ? ' [WW_FAST_TIMERS: test mode, timers compressed]' : ''}`);
 });

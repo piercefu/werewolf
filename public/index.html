@@ -158,6 +158,16 @@
   .countdown { font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
   .speaker-highlight { text-align: center; padding: 18px; }
   .speaker-highlight .who { font-size: 1.4rem; font-weight: 800; margin: 6px 0; }
+  .speaker-highlight.your-turn {
+    border: 2px solid var(--accent2);
+    background: linear-gradient(160deg, var(--card2), var(--card));
+    animation: your-turn-pulse 1.1s ease-in-out infinite;
+  }
+  .speaker-highlight.your-turn .tiny { color: var(--accent2); font-weight: 800; letter-spacing: 0.05em; }
+  @keyframes your-turn-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.5); }
+    50% { box-shadow: 0 0 0 10px rgba(255, 107, 107, 0); }
+  }
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 50;
     display: flex; align-items: flex-end; justify-content: center;
@@ -175,11 +185,29 @@
   .role-entry p { margin: 4px 0 0; font-size: 0.85rem; }
   .retro-entry { font-size: 0.88rem; color: var(--text); padding: 6px 0; border-bottom: 1px solid var(--border); }
   .retro-entry:last-child { border-bottom: none; }
+
+  /* Auto-dismissing vote-result toast — see #toast-root below. */
+  #toast-root {
+    position: fixed; top: 14px; left: 0; right: 0; z-index: 60;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 0 16px; pointer-events: none;
+  }
+  .toast {
+    max-width: 520px; width: 100%;
+    background: var(--card); border: 1px solid var(--accent); border-radius: 14px;
+    padding: 14px 20px; box-shadow: 0 10px 28px rgba(0,0,0,0.4);
+    font-weight: 700; text-align: center; color: var(--text);
+    transform: translateY(-24px); opacity: 0;
+    transition: transform 0.35s ease, opacity 0.35s ease;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.sheriff { border-color: var(--warn); }
 </style>
 </head>
 <body>
 <div id="app"><div class="center" style="padding-top:60px;color:var(--muted)">Loading…</div></div>
 <div id="modal-root"></div>
+<div id="toast-root"></div>
 
 <script>
 (function () {
@@ -187,6 +215,7 @@
 
   const $app = document.getElementById('app');
   const $modalRoot = document.getElementById('modal-root');
+  const $toastRoot = document.getElementById('toast-root');
   const LS_KEY = 'werewolf_session_v2';
 
   let session = loadSession();   // {roomCode, playerId, token}
@@ -202,6 +231,7 @@
   try { soundOn = localStorage.getItem('ww_sound') !== 'off'; } catch (e) {}
   let audioCtx = null;
   let lastStepKey = null;        // last-seen phase/sub-phase "step", to detect transitions
+  let lastMyTurn = null;         // last-seen "is it my speech turn right now" — null sentinel, see pollOnce
   function ensureAudioCtx() {
     if (!audioCtx) {
       try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* unsupported */ }
@@ -236,14 +266,77 @@
   function stepKeyFor(v) {
     if (!v) return null;
     return [
-      v.phase, v.nightSubPhase || '', (v.discussion && v.discussion.speakerId) || '',
-      (v.campaign && v.campaign.subPhase) || '', v.voteCountdown ? 'vc' : '',
+      v.phase, v.nightSubPhase || '', (v.discussion && v.discussion.currentSpeakerId) || '',
+      (v.campaign && v.campaign.subPhase) || '', (v.campaign && v.campaign.currentSpeakerId) || '',
+      (v.lastWords && v.lastWords.speakerId) || '',
+      v.voteCountdown ? 'vc' : '',
     ].join('|');
+  }
+  // Whether it's specifically the local player's turn to speak right now
+  // (discussion, campaign speeches, or last words) — used to fire a
+  // distinct, more insistent cue than the general phase-change chime the
+  // instant that becomes true, so a player isn't relying on noticing a
+  // highlighted card.
+  function isMyTurnNow(v) {
+    if (!v) return false;
+    if (v.discussion && v.discussion.isYourTurn) return true;
+    if (v.campaign && v.campaign.subPhase === 'speeches' && v.campaign.isYourTurn) return true;
+    if (v.lastWords && v.lastWords.isYourTurn) return true;
+    return false;
+  }
+  function playYourTurnChime() {
+    if (!soundOn) return;
+    const ctx = ensureAudioCtx();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') { ctx.resume().catch(() => {}); return; }
+    // Two quick rising notes — deliberately distinct from the single-tone
+    // phase-change chime, so it reads as "hey, YOU" rather than "something
+    // changed".
+    [0, 0.16].forEach((offset, i) => {
+      const now = ctx.currentTime + offset;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.16, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+      gain.connect(ctx.destination);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(i === 0 ? 660 : 880, now);
+      osc.connect(gain);
+      osc.start(now);
+      osc.stop(now + 0.22);
+    });
+    // A short buzz on devices that support it — helpful if the phone is on
+    // silent, which is common at a table full of people trying to focus.
+    try { if (navigator.vibrate) navigator.vibrate([60, 40, 60]); } catch (e) {}
   }
   function toggleSound() {
     soundOn = !soundOn;
     try { localStorage.setItem('ww_sound', soundOn ? 'on' : 'off'); } catch (e) {}
     render();
+  }
+
+  // --- vote-result toast (day elimination vote + Sheriff election) ---
+  // `undefined` (not null) is the "haven't looked yet" sentinel, so a page
+  // load that lands mid-game right after a real vote already resolved shows
+  // no toast for it — only a genuinely NEW event id (seen for the first time
+  // after we've already recorded a baseline) triggers one. Lives in its own
+  // #toast-root, outside #app, so render()'s full innerHTML rebuild on every
+  // poll tick can't cut an in-progress slide-in/fade-out animation short.
+  let lastVoteEventId;
+  function showVoteToast(evt) {
+    if (!$toastRoot) return;
+    const el = document.createElement('div');
+    el.className = 'toast' + (evt.kind === 'sheriff' ? ' sheriff' : '');
+    el.textContent = evt.text;
+    $toastRoot.appendChild(el);
+    // Double rAF so the initial (offscreen/transparent) state is painted
+    // before the 'show' class kicks off the CSS transition to it.
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
+    setTimeout(() => {
+      el.classList.remove('show');
+      setTimeout(() => el.remove(), 400);
+    }, 4200);
   }
 
   function loadSession() {
@@ -316,8 +409,22 @@
         // Only chime on a genuine transition, and never on the very first
         // view we ever load (lastStepKey starts null) — that would chime
         // just for opening the app.
-        if (lastStepKey !== null && newKey !== lastStepKey && view.phase !== 'lobby') playChime();
+        const stepChanged = lastStepKey !== null && newKey !== lastStepKey && view.phase !== 'lobby';
+        const nowMyTurn = isMyTurnNow(view);
+        const myTurnJustStarted = lastMyTurn !== null && nowMyTurn && !lastMyTurn;
+        // When it's specifically become YOUR turn, that distinct cue replaces
+        // (rather than layers under) the generic phase-change chime — both
+        // firing on the same transition would be a jarring double-sound for
+        // the exact moment we're trying to make cleanly obvious.
+        if (myTurnJustStarted) playYourTurnChime();
+        else if (stepChanged) playChime();
         lastStepKey = newKey;
+        lastMyTurn = nowMyTurn;
+        const newVoteId = view.voteResultEvent ? view.voteResultEvent.id : null;
+        if (lastVoteEventId !== undefined && newVoteId !== lastVoteEventId && view.voteResultEvent) {
+          showVoteToast(view.voteResultEvent);
+        }
+        lastVoteEventId = newVoteId;
       } else {
         view = null;
         clearSession();
@@ -552,6 +659,7 @@
           ${view.you.isLobbyLeader ? '<span class="pill leader">★ Leader</span>' : ''}
           <button class="icon-btn small" id="btn-sound" title="${soundOn ? 'Mute phase-change sound' : 'Unmute phase-change sound'}">${soundOn ? '🔔' : '🔕'}</button>
           <button class="icon-btn small" id="btn-rules">📖</button>
+          <button class="icon-btn small" id="btn-leave" title="Leave this game">🚪</button>
         </div>
       </div>
     `;
@@ -570,12 +678,26 @@
     }
 
     if (view.phase !== 'lobby') {
+      // The "everyone points at once" reveal — who voted for whom, once a
+      // vote is fully locked in. Deliberately shown to EVERY player (alive
+      // or not), regardless of phase, same as the toast it rides in on
+      // (view.voteResultEvent) — it stays up until the next such vote
+      // replaces it, since once it's public knowledge in real life it
+      // doesn't un-reveal itself either.
+      if (view.voteResultEvent && view.voteResultEvent.breakdown) html += renderVoteBreakdownCard(view.voteResultEvent);
       html += renderPlayersCard(view);
       html += renderLog(view.log);
     }
     $app.innerHTML = html;
     document.getElementById('btn-rules').onclick = openRulesModal;
     if (document.getElementById('btn-sound')) document.getElementById('btn-sound').onclick = toggleSound;
+    document.getElementById('btn-leave').onclick = () => {
+      if (!confirm('Leave this game? You\'ll return to the main menu — you can rejoin later with the room code if the game is still going.')) return;
+      clearSession();
+      view = null;
+      landingMode = 'menu';
+      render();
+    };
     wireControls(view);
   }
 
@@ -683,6 +805,7 @@
     if (view.hunterShot && view.hunterShot.active) html += renderHunterShotUI(view);
     if (view.sheriffHandoff && view.sheriffHandoff.active) html += renderSheriffHandoffUI(view);
     if (view.sheriffDirection && view.sheriffDirection.active) html += renderSheriffDirectionUI(view);
+    if (view.lastWords && view.lastWords.active) html += renderLastWordsUI(view);
     return html;
   }
 
@@ -724,7 +847,7 @@
           : `<button id="btn-run">🎤 Run for Sheriff</button>`;
       }
     } else if (c.subPhase === 'speeches') {
-      html += `<div class="speaker-highlight"><div class="tiny">Now speaking</div><div class="who">${esc(nameOf(c.currentSpeakerId))}</div><div class="countdown">${c.secondsLeft}s</div></div>`;
+      html += `<div class="speaker-highlight${c.isYourTurn ? ' your-turn' : ''}"><div class="tiny">${c.isYourTurn ? '🎤 YOUR TURN' : 'Now speaking'}</div><div class="who">${esc(nameOf(c.currentSpeakerId))}</div><div class="countdown">${c.secondsLeft}s</div></div>`;
       if (c.isYourTurn) html += `<button id="btn-campaign-done">✅ I\'m done speaking</button>`;
       html += `<p class="tiny" style="margin-top:8px">Speaking order: ${c.queue.map((id, i) => (i === c.pointer ? '<b>' : '') + esc(nameOf(id)) + (i === c.pointer ? '</b>' : '')).join(' → ')}</p>`;
     } else if (c.subPhase === 'vote') {
@@ -735,6 +858,10 @@
           const sel = c.yourVote === cand.id ? ' selected' : '';
           html += `<button class="choicebtn${sel}" data-pid="${cand.id}">${esc(cand.name)}</button>`;
         }
+        // Same reasoning as the day vote's abstain button: an active choice
+        // that lets the vote conclude as soon as everyone has acted, instead
+        // of one holdout forcing the whole table to wait out the timer.
+        html += `<button class="choicebtn${c.yourAbstain ? ' selected' : ''}" id="btn-abstain-election">🙅 Abstain</button>`;
         html += '</div>';
       } else if (c.youAreCandidate) {
         html += `<p>You\'re running, so you don\'t get a vote in your own election.</p>`;
@@ -757,7 +884,7 @@
     const d = view.discussion;
     if (d) {
       const dirTxt = dirArrowFor(d.direction) ? ` ${dirArrowFor(d.direction)}` : '';
-      html += `<div class="card speaker-highlight"><div class="tiny">Now speaking${dirTxt}</div><div class="who">${esc(nameOf(d.currentSpeakerId))}</div><div class="countdown">${d.secondsLeft}s</div><div class="tiny" style="margin-top:6px">${d.pointer + 1} / ${d.queue.length}</div></div>`;
+      html += `<div class="card speaker-highlight${d.isYourTurn ? ' your-turn' : ''}"><div class="tiny">${d.isYourTurn ? '🎤 YOUR TURN' : 'Now speaking'}${dirTxt}</div><div class="who">${esc(nameOf(d.currentSpeakerId))}</div><div class="countdown">${d.secondsLeft}s</div><div class="tiny" style="margin-top:6px">${d.pointer + 1} / ${d.queue.length}</div></div>`;
       if (d.isYourTurn) html += `<div class="card"><button id="btn-finish-speech">✅ I\'m done speaking</button></div>`;
     }
     if (view.knightDuel && view.knightDuel.active) html += renderKnightDuelUI(view);
@@ -889,6 +1016,15 @@
     html += '</div>';
     return html;
   }
+  function renderLastWordsUI(view) {
+    const lw = view.lastWords;
+    if (lw.isYourTurn) {
+      let html = `<div class="card speaker-highlight your-turn"><div class="tiny">🕊️ YOUR LAST WORDS</div><div class="who">Say your piece out loud</div><div class="countdown">${lw.secondsLeft}s</div></div>`;
+      html += `<div class="card"><button id="btn-finish-lastwords">✅ I\'m done</button></div>`;
+      return html;
+    }
+    return `<div class="card speaker-highlight"><div class="tiny">🕊️ Last words</div><div class="who">${esc(lw.speakerName)}</div><div class="countdown">${lw.secondsLeft}s</div></div>`;
+  }
   function renderSheriffDirectionUI(view) {
     const d = view.sheriffDirection;
     let html = `<div class="card"><h3>🎖️ Pick the speaking order</h3><div class="tiny">${d.secondsLeft}s left</div>`;
@@ -920,12 +1056,17 @@
   function renderDayVoteUI(view) {
     const dv = view.dayVote;
     let html = `<div class="card"><h3>☀️ Vote to eliminate</h3><div class="tiny">${dv.secondsLeft}s left</div>`;
-    html += `<p class="tiny">${dv.votedCount}/${dv.totalVoters} voted · your vote is worth ${dv.youWeight}x · it\'s ok to abstain</p>`;
+    html += `<p class="tiny">${dv.votedCount}/${dv.totalVoters} voted (or abstained) · your vote is worth ${dv.youWeight}x</p>`;
     html += '<div class="stack" id="vote-choices">';
     for (const c of dv.candidates) {
       const sel = dv.yourVote === c.id ? ' selected' : '';
       html += `<button class="choicebtn${sel}" data-pid="${c.id}">${esc(c.name)}</button>`;
     }
+    // Abstaining is an active choice, not just "do nothing and wait out the
+    // timer" — once every eligible voter has either voted or abstained, the
+    // vote resolves immediately instead of the whole table waiting on the
+    // clock for one holdout.
+    html += `<button class="choicebtn${dv.yourAbstain ? ' selected' : ''}" id="btn-abstain-dayvote">🙅 Abstain</button>`;
     html += '</div>';
     html += '</div>';
     return html;
@@ -948,6 +1089,16 @@
 
   function renderSeerLastResult(r) {
     return `<div class="banner">🔮 You checked <b>${esc(r.name)}</b>: they are on the <b>${r.team === 'wolf' ? 'Werewolf' : 'Village'}</b> team.</div>`;
+  }
+
+  function renderVoteBreakdownCard(evt) {
+    const title = evt.kind === 'sheriff' ? '🎖️ Election — who voted for whom' : '🗳️ Final vote — who voted for whom';
+    const rows = evt.breakdown.map((b) => {
+      if (b.candidate) return `<div class="flex-between"><span>${esc(b.voterName)}</span><span class="tiny">running — no vote</span></div>`;
+      const target = b.targetName ? `→ ${esc(b.targetName)}` : `<span class="tiny">${b.abstained ? 'abstained' : 'no vote'}</span>`;
+      return `<div class="flex-between"><span>${esc(b.voterName)}</span><span>${target}</span></div>`;
+    }).join('');
+    return `<div class="card"><h3>${title}</h3><div class="stack" style="gap:6px">${rows}</div></div>`;
   }
 
   function renderPlayersCard(view, opts) {
@@ -1065,6 +1216,7 @@
     document.querySelectorAll('#election-choices [data-pid]').forEach((el) => {
       el.onclick = () => doAction('player/electionVote', authBody({ targetId: el.dataset.pid }));
     });
+    if (b('btn-abstain-election')) b('btn-abstain-election').onclick = () => doAction('player/electionVoteAbstain', authBody());
 
     // Reactive prompts
     document.querySelectorAll('#hunter-choices [data-pid]').forEach((el) => {
@@ -1074,6 +1226,7 @@
       el.onclick = () => doAction('player/sheriffHandoff', authBody({ targetId: el.dataset.pid }));
     });
     if (b('btn-handoff-discard')) b('btn-handoff-discard').onclick = () => doAction('player/sheriffHandoff', authBody({ action: 'discard' }));
+    if (b('btn-finish-lastwords')) b('btn-finish-lastwords').onclick = () => doAction('player/finishLastWords', authBody());
     document.querySelectorAll('[data-side]').forEach((el) => {
       el.onclick = () => doAction('player/sheriffDirection', authBody({ side: el.dataset.side }));
     });
@@ -1097,6 +1250,7 @@
     document.querySelectorAll('#vote-choices [data-pid]').forEach((el) => {
       el.onclick = () => doAction('player/dayVote', authBody({ targetId: el.dataset.pid }));
     });
+    if (b('btn-abstain-dayvote')) b('btn-abstain-dayvote').onclick = () => doAction('player/dayVoteAbstain', authBody());
 
     // Game over
     if (b('btn-new-game')) b('btn-new-game').onclick = () => doAction('player/resetGame', authBody());
@@ -1105,6 +1259,23 @@
   // ---------------------------------------------------------------------
   // Boot
   // ---------------------------------------------------------------------
+  // If this link points at a DIFFERENT room than the one we're remembered as
+  // being in, don't silently resume the stale session — that traps anyone
+  // who still has an old (often finished) game saved in their browser the
+  // instant they tap a NEW invite link, unable to reach the room it points
+  // to without manually clearing site data first. Only auto-resume when the
+  // URL doesn't name a room, or names the SAME one (reopening your own
+  // game's link to reconnect mid-game is exactly the case this session
+  // persistence is FOR, so that path is untouched).
+  (function resolveSessionVsUrl() {
+    const urlRoom = new URLSearchParams(location.search).get('room');
+    if (urlRoom && session && session.roomCode !== urlRoom.toUpperCase()) {
+      clearSession();
+      landingMode = 'join';
+      joinRoomInput = urlRoom.toUpperCase();
+    }
+  })();
+
   loadRolesInfo();
   if (session) {
     startPolling();
