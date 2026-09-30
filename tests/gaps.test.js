@@ -192,7 +192,54 @@ async function scenarioKingKillIsFinal() {
   console.log('--- wolf king kill is final scenario done ---');
 }
 
+// ---------------------------------------------------------------------------
+// Multiple Hunters (fun variant): the lobby allows 2+, a Hunter shot by
+// another Hunter gets their own shot, and every queued turn (shots and last
+// words) gets its full time from when it actually becomes that player's turn.
+// ---------------------------------------------------------------------------
+async function scenarioMultiHunter() {
+  const names = ['Ha', 'Hb', 'Hc', 'Hd', 'He', 'Hf'];
+  const { roomCode, players } = await setupRoom(names[0], names.slice(1));
+  const leader = players[names[0]];
+  const cfg = await api('player/setRoleConfig', { ...auth(roomCode, leader), roleConfig: { Werewolf: 1, Hunter: 2, Villager: 3 } });
+  t.ok(cfg.ok, '[hunters] the lobby accepts 2 Hunters', cfg);
+  const lv = await state(roomCode, leader.playerId, leader.token);
+  t.ok(lv.lobby.roleConfig.Hunter === 2, '[hunters] ...and keeps it at 2 (no longer capped at 1)', lv.lobby.roleConfig);
+  await configureAndStart(roomCode, players, names[0], { Werewolf: 1, Hunter: 2, Villager: 3 }, { speech: 3, nightAction: 3 });
+  const roles = await rolesOf(roomCode, players, names);
+  const [h1, h2] = names.filter((n) => roles[n] === 'Hunter');
+  const villager = names.find((n) => roles[n] === 'Villager');
+  t.ok(h1 && h2, '[hunters] two different players were dealt the Hunter', roles);
+
+  await pollUntil(roomCode, leader, (v) => v.phase === 'day_vote', { timeoutMs: 40000 });
+  await voteOut(roomCode, players, names, h1);
+  const s1 = await api('player/hunterShoot', { ...auth(roomCode, players[h1]), targetId: players[h2].playerId });
+  t.ok(s1.ok, '[hunters] the executed Hunter shoots the other Hunter', s1);
+  const h2v = await state(roomCode, players[h2].playerId, players[h2].token);
+  t.ok(h2v.hunterShot && h2v.hunterShot.active, '[hunters] the second Hunter now gets their own shot', h2v.hunterShot);
+  const s2 = await api('player/hunterShoot', { ...auth(roomCode, players[h2]), targetId: players[villager].playerId });
+  t.ok(s2.ok, '[hunters] ...and fires it', s2);
+  let v = await state(roomCode, leader.playerId, leader.token);
+  const shots = (v.publicEvents || []).filter((e) => e.kind === 'hunter');
+  t.ok(shots.length === 2 && shots[0].text.includes(h1) && shots[1].text.includes(h2), '[hunters] both shots get their own popup, in order', shots.map((e) => e.text));
+  t.ok([h1, h2, villager].every((n) => !v.players.find((p) => p.name === n).alive), '[hunters] all three are dead');
+
+  // Three last-words turns are now queued (h1, h2, villager). Let the first
+  // speaker use most of their time; the next one must still get a full turn.
+  await new Promise((r) => setTimeout(r, 2200));
+  await api('player/finishLastWords', auth(roomCode, players[h1]));
+  v = await state(roomCode, leader.playerId, leader.token);
+  t.ok(v.lastWords && v.lastWords.speakerName === h2 && v.lastWords.secondsLeft >= 2,
+    '[queue] the next speaker gets a fresh full turn, not what was left over while waiting', v.lastWords);
+  await api('player/finishLastWords', auth(roomCode, players[h2]));
+  await api('player/finishLastWords', auth(roomCode, players[villager]));
+  v = await pollUntil(roomCode, leader, (v) => v.phase === 'night' || v.phase === 'game_over', { timeoutMs: 6000 });
+  t.ok(v.phase === 'night' || v.phase === 'game_over', '[hunters] the day wraps up normally afterwards', v.phase);
+  console.log('--- multiple hunters scenario done ---');
+}
+
 (async () => {
+  await scenarioMultiHunter();
   await scenarioKingKillIsFinal();
   await scenarioRemovePlayer();
   await scenarioFool();

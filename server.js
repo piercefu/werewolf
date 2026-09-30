@@ -89,7 +89,6 @@ const ROLE_DEFS = {
     label: 'Hunter',
     icon: '🏹',
     blurb: 'If you die for any reason other than the witch’s poison, you immediately fire back and take one other player down with you.',
-    maxCount: 1,
   },
   Fool: {
     team: 'village',
@@ -247,7 +246,8 @@ function newRoom(code) {
     // killed/dying in a Knight duel, or the Werewolf King reveal) gets one
     // final speech turn before the game moves on — real in-person Werewolf
     // lets the person being led away say something before the table moves
-    // on, and a night death (found dead in the morning) never gets this.
+    // on. A night death (found dead in the morning) doesn't — except on the
+    // first night, a house rule (see revealNightAndEnterAnnounce).
     // Queued automatically inside applyDeaths() based on the death's cause,
     // resolved one at a time (front of the queue), same shape/pattern as
     // pendingHunterShots.
@@ -693,6 +693,11 @@ function reactiveClear(room) {
 function resolveLastWords(room, playerId) {
   if (room.pendingLastWords[0]?.playerId !== playerId) return;
   room.pendingLastWords.shift();
+  // The next speaker's clock starts NOW, when it's actually their turn — not
+  // when they were queued. Otherwise, if the person before them used their
+  // full time (e.g. a Hunter's last words before their victim's, or two
+  // first-night victims), the next person's turn could expire unseen.
+  if (room.pendingLastWords[0]) room.pendingLastWords[0].deadline = Date.now() + room.timers.speech * 1000;
   trySettleReactive(room);
 }
 
@@ -884,7 +889,22 @@ function revealNightAndEnterAnnounce(room) {
     room.lastAnnouncement = names.map((n) => `${n} died during the night.`);
     for (const n of names) log(room, `${n} died during the night.`);
     const who = names.length === 1 ? `${names[0]} died` : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} died`;
-    firePublicEvent(room, 'dawn', '🌅', `Day ${room.dayNumber} — dawn breaks`, `${who} during the night.`);
+    const firstNightNote = room.dayNumber === 1 ? ` As the first night's ${names.length === 1 ? 'victim, they get' : 'victims, they each get'} last words.` : '';
+    firePublicEvent(room, 'dawn', '🌅', `Day ${room.dayNumber} — dawn breaks`, `${who} during the night.${firstNightNote}`);
+  }
+
+  // House rule: whoever dies on the FIRST night gets last words too (every
+  // later night death still doesn't). Otherwise a player taken out before
+  // the game has even started — often exactly the Seer or Witch the wolves
+  // were most afraid of — never gets to say a single word. Queued through
+  // the same last-words gate as a day death, so the day waits for them.
+  if (room.dayNumber === 1) {
+    for (const d of room.lastNightDeaths) {
+      const p = getPlayer(room, d.id);
+      if (p && !p.alive && !room.pendingLastWords.some((lw) => lw.playerId === p.id)) {
+        room.pendingLastWords.push({ playerId: p.id, deadline: Date.now() + room.timers.speech * 1000 });
+      }
+    }
   }
 
   // If the sitting sheriff was secretly killed last night (elected during
@@ -898,7 +918,7 @@ function revealNightAndEnterAnnounce(room) {
 
   if (!reactiveClear(room)) {
     room.afterReactive = 'to_discussion_from_announce';
-    return; // stay in day_announce until hunter shot / handoff resolve
+    return; // stay in day_announce until hunter shot / handoff / first-night last words resolve
   }
   finalizeAnnounceIntoDiscussion(room);
 }
@@ -1177,6 +1197,9 @@ function startNextNight(room) {
 
 function resolveHunterShot(room, hunterId, targetId) {
   room.pendingHunterShots = room.pendingHunterShots.filter((h) => h.hunterId !== hunterId);
+  // Same idea for a queued Hunter (e.g. one Hunter shooting another): their
+  // clock starts when it becomes their turn to fire, not when they died.
+  if (room.pendingHunterShots[0]) room.pendingHunterShots[0].deadline = Date.now() + room.timers.nightAction * 1000;
   if (targetId) {
     const target = getPlayer(room, targetId);
     if (target && target.alive) {

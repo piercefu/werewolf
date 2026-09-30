@@ -12,11 +12,11 @@
 //   - the server rejects an action the player's own screen offered them
 //     (a sign the UI and server disagree about what's allowed).
 // Randomized on purpose, so each run explores different paths. SOAK_GAMES
-// (default 4) controls how many games are played.
+// (default 5, one per role setup) controls how many games are played.
 const { api, state, sleep, setupRoom, configureAndStart, Tally } = require('./lib');
 
 const t = new Tally();
-const GAMES = Number(process.env.SOAK_GAMES || 4);
+const GAMES = Number(process.env.SOAK_GAMES || 5);
 const STALL_MS = 15000;
 const GAME_MS = 240000;
 const rnd = (n) => Math.floor(Math.random() * n);
@@ -30,6 +30,7 @@ const CONFIGS = [
   { Werewolf: 1, WerewolfKing: 1, HiddenWolf: 1, Seer: 1, Witch: 1, Hunter: 1, Knight: 1, Villager: 2 },
   { Werewolf: 2, Seer: 1, Hunter: 1, Guard: 1, Fool: 1, Villager: 2 },
   { Werewolf: 1, HiddenWolf: 1, Witch: 1, Knight: 1, Hunter: 1, Villager: 2 },
+  { Werewolf: 2, Hunter: 3, Witch: 1, Villager: 2 }, // "multiple Hunters" fun variant
 ];
 
 async function playGame(g) {

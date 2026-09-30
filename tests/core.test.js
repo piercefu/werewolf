@@ -131,6 +131,15 @@ async function scenarioA() {
   v = await until(roomCode, players, leaderName, (v) => v.sheriffId === players[guardName].playerId, { timeoutMs: 3000 });
   t.ok(v.sheriffId === players[guardName].playerId, '[A] Guard is now sheriff');
 
+  // The dead sheriff-elect died on the FIRST night, so (house rule) they also
+  // get last words — the speaking-order pick waits until they're done.
+  const lwView = await getView(roomCode, players, leaderName);
+  // (1-second timers here, so the turn may already have timed out — the
+  // rule itself is checked properly in lastwords.test.js.)
+  t.ok(!lwView.lastWords || lwView.lastWords.speakerName === deadCandidateName, '[A] if last words are still running, they belong to the first-night victim', lwView.lastWords);
+  if (lwView.lastWords) await api('player/finishLastWords', { roomCode, playerId: players[deadCandidateName].playerId, token: players[deadCandidateName].token });
+  await until(roomCode, players, guardName, (v) => v.sheriffDirection && v.sheriffDirection.active, { timeoutMs: 3000 });
+
   const guardDirView = await getView(roomCode, players, guardName);
   t.ok(guardDirView.sheriffDirection && guardDirView.sheriffDirection.active && guardDirView.sheriffDirection.kind === 'death', '[A] Guard (new sheriff) prompted to pick speech direction around the deceased', guardDirView.sheriffDirection);
   await api('player/sheriffDirection', { roomCode, playerId: players[guardName].playerId, token: players[guardName].token, side: 'right' });

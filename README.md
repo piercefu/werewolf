@@ -101,8 +101,10 @@ marker never appears for or about a Hidden Wolf.
 - **Anyone who dies during the day** — executed by vote, shot by the Hunter,
   or on either end of a Knight's duel — gets one final "last words" speech
   turn before the game moves on, just like the table would let them speak
-  before being led away in person. A night death never gets this; it's only
-  discovered (and never explained) the next morning.
+  before being led away in person. A night death normally doesn't get this
+  (it's only discovered, never explained, the next morning), with one house
+  rule: **whoever dies on the first night gets last words** on the morning
+  of Day 1, so nobody is knocked out before saying a single word.
 - **A tied day vote or Sheriff election isn't a coin flip.** The tied players
   get one more speech turn, then the village votes again among just them —
   see "House-rule choices" below for what happens if that runoff ties too.
@@ -264,7 +266,7 @@ role — it's the label your group already uses; it only affects gameplay
 under the **Extinction** win condition, where wiping out all Gods (or all
 plain Villagers) wins it for the wolves.
 
-Every role except Werewolf and Villager is capped at **1 per game** in the
+Every role except Werewolf, Villager and Hunter is capped at **1 per game** (multiple Hunters is a fun variant: each one gets their own shot, and a Hunter shot by another Hunter fires back too) in the
 lobby's role setup — these are the roles whose one-time abilities and
 night-action state (the Witch's potions, in particular) are only tracked
 once per game, not once per player, so a second copy of any of them isn't

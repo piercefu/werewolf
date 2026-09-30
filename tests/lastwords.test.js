@@ -2,7 +2,8 @@
 // (execution, a Hunter's shot, or a Knight duel — win or lose) gets one
 // final speech turn before the game moves on, exactly like an in-person
 // table lets someone speak before they're led away. A NIGHT death (found
-// dead in the morning) never gets this — nobody speaks in their sleep.
+// dead in the morning) doesn't — except on the FIRST night, a house rule
+// so nobody is knocked out before saying a single word.
 // Implemented as another reactive gate (room.pendingLastWords), so the game
 // correctly pauses on it the same way it already does for a pending Hunter
 // shot or Sheriff handoff.
@@ -11,31 +12,53 @@ const { api, state, sleep, setupRoom, configureAndStart, pollUntil, findRoles, T
 const t = new Tally();
 
 // ---------------------------------------------------------------------------
-// Scenario 1: a NIGHT kill never queues last words — the transition into the
-// day should proceed without ever pausing for anyone to speak.
+// Scenario 1: night deaths. House rule: the FIRST night's victim gets last
+// words on the morning of Day 1 (the day waits for them); a victim of any
+// LATER night does not.
 // ---------------------------------------------------------------------------
 async function scenarioNightKill() {
   const allNames = ['Leader', 'Bo', 'Cy', 'Dee', 'Eli'];
   const { roomCode, players } = await setupRoom('Leader', allNames.slice(1));
   const leader = players.Leader;
-  await configureAndStart(roomCode, players, 'Leader', { Werewolf: 1, Villager: 4 });
+  // Longer speech turns so the first-night last words don't simply time out
+  // before we look at them.
+  await configureAndStart(roomCode, players, 'Leader', { Werewolf: 1, Villager: 4 }, { speech: 20 });
 
   const found = await findRoles(roomCode, players, allNames, ['Werewolf']);
   const wolf = players[found.Werewolf];
   const villagerNames = allNames.filter((n) => n !== found.Werewolf);
-  const victim = villagerNames[0];
+  const [victim, victim2] = villagerNames;
 
-  const wolfView = await state(roomCode, wolf.playerId, wolf.token);
+  let wolfView = await state(roomCode, wolf.playerId, wolf.token);
   await api('player/wolfVote', { roomCode, playerId: wolf.playerId, token: wolf.token, targetId: wolfView.wolfPhase.candidates.find((c) => c.name === victim).id });
 
-  // Day 1's campaign runs before anything is revealed regardless (existing
-  // behavior) — nobody ran, so it concludes quickly and moves on.
-  let v = await pollUntil(roomCode, leader, (v) => v.phase === 'day_discussion' || v.phase === 'day_announce', { timeoutMs: 15000 });
-  t.ok(v.phase === 'day_discussion' || v.phase === 'day_announce', '[night] reached the day normally after a night kill', v.phase);
-  t.ok(!v.lastWords, '[night] no last-words prompt was ever queued for a night death', v.lastWords);
-
+  // Day 1's campaign runs first (nobody runs), then the night is revealed.
+  let v = await pollUntil(roomCode, leader, (v) => v.lastWords && v.lastWords.active, { timeoutMs: 15000 });
+  t.ok(v.lastWords && v.lastWords.speakerName === victim, '[night 1] the first night\'s victim gets last words on the morning of Day 1', v.lastWords);
+  t.ok(v.phase === 'day_announce', '[night 1] the day waits for them — discussion hasn\'t started yet', v.phase);
   const victimView = await state(roomCode, players[victim].playerId, players[victim].token);
-  t.ok(!victimView.lastWords, '[night] the night-killed player\'s own view has no last-words prompt either', victimView.lastWords);
+  t.ok(victimView.lastWords && victimView.lastWords.isYourTurn === true, '[night 1] on the victim\'s own phone it\'s their turn to speak', victimView.lastWords);
+  const dawn = (v.publicEvents || []).find((e) => e.kind === 'dawn');
+  t.ok(dawn && /last words/.test(dawn.text) && dawn.text.includes(victim), '[night 1] the dawn popup says they get last words', dawn);
+
+  const fin = await api('player/finishLastWords', { roomCode, playerId: players[victim].playerId, token: players[victim].token });
+  t.ok(fin.ok, '[night 1] the victim finishes', fin);
+  v = await pollUntil(roomCode, leader, (v) => v.phase === 'day_discussion', { timeoutMs: 5000 });
+  t.ok(v.phase === 'day_discussion' && v.discussion && !v.discussion.queue.includes(players[victim].playerId), '[night 1] ...then discussion starts, without the dead player in the speaking order', v.discussion);
+
+  // Talk through Day 1, let the vote lapse, and have the wolf kill again on night 2.
+  for (let i = 0; i < 10; i++) {
+    const cur = await state(roomCode, leader.playerId, leader.token);
+    if (cur.phase !== 'day_discussion') break;
+    const sp = allNames.find((n) => players[n].playerId === cur.discussion.currentSpeakerId);
+    await api('player/finishSpeech', { roomCode, playerId: players[sp].playerId, token: players[sp].token });
+  }
+  wolfView = await pollUntil(roomCode, wolf, (v) => v.phase === 'night' && v.dayNumber === 2 && v.wolfPhase, { timeoutMs: 15000 });
+  await api('player/wolfVote', { roomCode, playerId: wolf.playerId, token: wolf.token, targetId: wolfView.wolfPhase.candidates.find((c) => c.name === victim2).id });
+  v = await pollUntil(roomCode, leader, (v) => v.dayNumber === 2 && (v.phase === 'day_discussion' || v.phase === 'game_over'), { timeoutMs: 15000 });
+  t.ok(v.phase === 'day_discussion', '[night 2] Day 2 goes straight into discussion', v.phase);
+  t.ok(!v.lastWords, '[night 2] a LATER night\'s victim gets no last words (only the first night does)', v.lastWords);
+  t.ok(!v.players.find((p) => p.name === victim2).alive, '[night 2] (they really did die overnight)');
 
   console.log('--- night-kill scenario done ---');
 }

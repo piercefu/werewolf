@@ -46,7 +46,7 @@ production behavior is untouched.
 every player making random legal choices from their own screen. It fails on a
 stalled or never-ending game, on any role shown that shouldn't be (with
 "reveal role on death" off), or on the server rejecting something a player's
-screen offered. It plays 4 games by default. Before a real game night, run a
+screen offered. It plays 5 games by default (one per role setup, including multiple Hunters). Before a real game night, run a
 bigger batch:
 
 ```
