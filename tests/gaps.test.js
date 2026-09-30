@@ -1,0 +1,166 @@
+// Covers the parts of the game that had no test at all before a coverage
+// audit: the Fool (survives their first execution, loses their vote, dies on
+// the second), the Extinction win condition, discarding the Sheriff badge,
+// "Start a new game with this group", and the lobby leader's Remove button
+// (which turned out to have never worked — see removePlayer in server.js).
+const { api, state, setupRoom, configureAndStart, pollUntil, Tally } = require('./lib');
+
+const t = new Tally();
+const auth = (roomCode, p) => ({ roomCode, playerId: p.playerId, token: p.token });
+async function rolesOf(roomCode, players, names) {
+  const roles = {};
+  for (const n of names) roles[n] = (await state(roomCode, players[n].playerId, players[n].token)).you.role;
+  return roles;
+}
+// Everyone alive votes for `target` (who abstains) — resolves immediately.
+async function voteOut(roomCode, players, names, target, skip = []) {
+  for (const n of names) {
+    if (skip.includes(n)) continue;
+    if (n === target) await api('player/dayVoteAbstain', auth(roomCode, players[n]));
+    else await api('player/dayVote', { ...auth(roomCode, players[n]), targetId: players[target].playerId });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fool: first execution -> survives, revealed, loses vote, no last words.
+// Next day: can't vote, the vote still resolves without them, and a second
+// execution kills them for real.
+// ---------------------------------------------------------------------------
+async function scenarioFool() {
+  const names = ['Al', 'Bea', 'Cid', 'Dia', 'Ed'];
+  const { roomCode, players } = await setupRoom(names[0], names.slice(1));
+  const leader = players[names[0]];
+  await configureAndStart(roomCode, players, names[0], { Werewolf: 1, Fool: 1, Villager: 3 });
+  const roles = await rolesOf(roomCode, players, names);
+  const fool = names.find((n) => roles[n] === 'Fool');
+  const bystander = names.find((n) => n !== fool);
+
+  await pollUntil(roomCode, leader, (v) => v.phase === 'day_vote', { timeoutMs: 20000 });
+  await voteOut(roomCode, players, names, fool);
+  let v = await state(roomCode, players[bystander].playerId, players[bystander].token);
+  const evt = (v.publicEvents || []).find((e) => e.kind === 'vote');
+  t.ok(evt && /Fool/.test(evt.text) && evt.text.includes(fool), '[fool] the vote popup announces the Fool surviving', evt);
+  const row = v.players.find((p) => p.name === fool);
+  t.ok(row.alive && row.role === 'Fool' && row.canVote === false, '[fool] Fool is alive, publicly revealed, and marked as having no vote', row);
+  t.ok(!v.lastWords, '[fool] no last-words turn — the Fool didn\'t die', v.lastWords);
+
+  v = await pollUntil(roomCode, leader, (v) => v.phase === 'day_vote' && v.dayNumber === 2, { timeoutMs: 30000 });
+  t.ok(v.phase === 'day_vote' && v.dayNumber === 2, '[fool] reached day 2\'s vote', { phase: v.phase, day: v.dayNumber });
+  const fv = await state(roomCode, players[fool].playerId, players[fool].token);
+  t.ok(fv.dayVoteBlocked === true && !fv.dayVote, '[fool] the Fool gets no vote buttons on day 2', { blocked: fv.dayVoteBlocked });
+  const tryVote = await api('player/dayVote', { ...auth(roomCode, players[fool]), targetId: players[bystander].playerId });
+  t.ok(!tryVote.ok, '[fool] the server rejects a vote from the Fool', tryVote);
+
+  // Everyone else votes the Fool out again — the vote must resolve without
+  // waiting on the Fool (who can't vote).
+  const aliveNames = v.players.filter((p) => p.alive).map((p) => p.name);
+  await voteOut(roomCode, players, aliveNames, fool, [fool]);
+  v = await state(roomCode, leader.playerId, leader.token);
+  const row2 = v.players.find((p) => p.name === fool);
+  t.ok(!row2.alive, '[fool] a second execution kills the Fool for real (and the vote closed without their ballot)', row2);
+  t.ok(v.lastWords && v.lastWords.speakerName === fool, '[fool] ...and this time they get last words', v.lastWords);
+  console.log('--- fool scenario done ---');
+}
+
+// ---------------------------------------------------------------------------
+// Extinction: executing the only "god" wins it for the wolves even though
+// they're heavily outnumbered — then "Start a new game" resets cleanly.
+// ---------------------------------------------------------------------------
+async function scenarioExtinctionAndReset() {
+  const names = ['Fa', 'Gi', 'Ho', 'Ix', 'Ju'];
+  const { roomCode, players } = await setupRoom(names[0], names.slice(1));
+  const leader = players[names[0]];
+  const wc = await api('player/setWinCondition', { ...auth(roomCode, leader), mode: 'extinction' });
+  t.ok(wc.ok, '[extinction] win condition set to extinction', wc);
+  await configureAndStart(roomCode, players, names[0], { Werewolf: 1, Seer: 1, Villager: 3 });
+  const roles = await rolesOf(roomCode, players, names);
+  const seer = names.find((n) => roles[n] === 'Seer');
+
+  await pollUntil(roomCode, leader, (v) => v.phase === 'day_vote', { timeoutMs: 20000 });
+  await voteOut(roomCode, players, names, seer);
+  let v = await state(roomCode, leader.playerId, leader.token);
+  t.ok(v.phase !== 'game_over', '[extinction] the game waits for the Seer\'s last words before deciding', v.phase);
+  await api('player/finishLastWords', auth(roomCode, players[seer]));
+  v = await pollUntil(roomCode, leader, (v) => v.phase === 'game_over', { timeoutMs: 5000 });
+  t.ok(v.phase === 'game_over' && v.winner === 'wolves', '[extinction] wiping out every god wins it for the wolves (1 wolf vs 3 villagers)', { phase: v.phase, winner: v.winner });
+  const maxIdBefore = Math.max(...v.publicEvents.map((e) => e.id));
+
+  // --- Start a new game with this group ---
+  const nonLeader = await api('player/resetGame', auth(roomCode, players[names[1]]));
+  t.ok(!nonLeader.ok, '[reset] only the lobby leader can start a new game', nonLeader);
+  const r = await api('player/resetGame', auth(roomCode, leader));
+  t.ok(r.ok, '[reset] leader resets the room', r);
+  v = await state(roomCode, players[names[1]].playerId, players[names[1]].token);
+  t.ok(v.phase === 'lobby' && v.you.role === null && v.players.every((p) => p.alive && p.role === undefined) && v.sheriffId === null && v.dayNumber === 0,
+    '[reset] everyone is back in the lobby: no roles, all alive, no Sheriff', { phase: v.phase, role: v.you.role, day: v.dayNumber });
+  t.ok(v.winConditionMode === 'extinction' && v.revealRoleOnDeath === false, '[reset] lobby settings are kept for the next game', { wc: v.winConditionMode, reveal: v.revealRoleOnDeath });
+  t.ok((v.publicEvents || []).length === 0, '[reset] old popups are cleared', v.publicEvents);
+  const again = await api('player/startGame', auth(roomCode, leader));
+  t.ok(again.ok, '[reset] a second game starts in the same room', again);
+  v = await state(roomCode, leader.playerId, leader.token);
+  const nightEvt = (v.publicEvents || []).find((e) => e.kind === 'night');
+  t.ok(v.phase === 'night' && v.dayNumber === 1 && nightEvt && nightEvt.id > maxIdBefore,
+    '[reset] second game is at Night 1, and its popups get new ids (so phones still show them)', { phase: v.phase, id: nightEvt && nightEvt.id, maxIdBefore });
+  console.log('--- extinction + reset scenario done ---');
+}
+
+// ---------------------------------------------------------------------------
+// Sheriff badge discarded (by choice) and lost to the timer.
+// ---------------------------------------------------------------------------
+async function scenarioBadgeDiscard() {
+  for (const how of ['discard', 'timeout']) {
+    const names = how === 'discard' ? ['Ka', 'Le', 'Mi', 'No', 'Ou'] : ['Pa', 'Qi', 'Ro', 'Su', 'Ty'];
+    const { roomCode, players } = await setupRoom(names[0], names.slice(1));
+    const leader = players[names[0]];
+    await configureAndStart(roomCode, players, names[0], { Werewolf: 1, Villager: 4 });
+    const roles = await rolesOf(roomCode, players, names);
+    const sheriff = names.find((n) => roles[n] === 'Villager' && n !== names[0]);
+    await pollUntil(roomCode, leader, (v) => v.phase === 'campaign', { timeoutMs: 10000 });
+    await api('player/runForSheriff', { ...auth(roomCode, players[sheriff]), action: 'run' });
+    await pollUntil(roomCode, leader, (v) => v.phase === 'day_vote', { timeoutMs: 25000 });
+    await voteOut(roomCode, players, names, sheriff);
+    if (how === 'discard') {
+      const d = await api('player/sheriffHandoff', { ...auth(roomCode, players[sheriff]), action: 'discard' });
+      t.ok(d.ok, '[badge] the executed Sheriff discards the badge', d);
+    }
+    await api('player/finishLastWords', auth(roomCode, players[sheriff]));
+    const v = await pollUntil(roomCode, leader, (v) => v.sheriffId === null && (v.publicEvents || []).some((e) => e.kind === 'badge'), { timeoutMs: 6000 });
+    const evt = (v.publicEvents || []).find((e) => e.kind === 'badge');
+    t.ok(v.sheriffId === null && evt && /discarded/.test(evt.text) && evt.text.includes(sheriff),
+      `[badge ${how}] no Sheriff afterwards, and everyone gets a "badge discarded" popup`, { sheriffId: v.sheriffId, evt });
+    const nv = await pollUntil(roomCode, leader, (v) => v.phase === 'night' || v.phase === 'game_over', { timeoutMs: 6000 });
+    t.ok(nv.phase === 'night' || nv.phase === 'game_over', `[badge ${how}] the game carries on afterwards`, nv.phase);
+  }
+  console.log('--- badge discard scenario done ---');
+}
+
+// ---------------------------------------------------------------------------
+// Lobby leader removes a player.
+// ---------------------------------------------------------------------------
+async function scenarioRemovePlayer() {
+  const names = ['Va', 'We', 'Xu', 'Ya'];
+  const { roomCode, players } = await setupRoom(names[0], names.slice(1));
+  const leader = players[names[0]];
+  const byOther = await api('player/removePlayer', { ...auth(roomCode, players.We), targetId: players.Xu.playerId });
+  t.ok(!byOther.ok, '[remove] a non-leader can\'t remove anyone', byOther);
+  const self = await api('player/removePlayer', { ...auth(roomCode, leader), targetId: leader.playerId });
+  t.ok(!self.ok, '[remove] the leader can\'t remove themselves', self);
+  const res = await api('player/removePlayer', { ...auth(roomCode, leader), targetId: players.Xu.playerId });
+  t.ok(res.ok, '[remove] the leader removes Xu', res);
+  const v = await state(roomCode, leader.playerId, leader.token);
+  t.ok(v.players.length === 3 && !v.players.some((p) => p.name === 'Xu'), '[remove] Xu is gone from the lobby', v.players.map((p) => p.name));
+  const gone = await state(roomCode, players.Xu.playerId, players.Xu.token);
+  t.ok(!gone, '[remove] Xu\'s phone is no longer in the room (it drops back to the menu)', gone && gone.phase);
+  await configureAndStart(roomCode, players, names[0], { Werewolf: 1, Villager: 2 });
+  const mid = await api('player/removePlayer', { ...auth(roomCode, leader), targetId: players.Ya.playerId });
+  t.ok(!mid.ok, '[remove] no removing players once the game has started', mid);
+  console.log('--- remove player scenario done ---');
+}
+
+(async () => {
+  await scenarioRemovePlayer();
+  await scenarioFool();
+  await scenarioExtinctionAndReset();
+  await scenarioBadgeDiscard();
+  t.finish();
+})().catch((e) => { console.error(e); process.exit(1); });

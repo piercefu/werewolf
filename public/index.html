@@ -186,28 +186,50 @@
   .retro-entry { font-size: 0.88rem; color: var(--text); padding: 6px 0; border-bottom: 1px solid var(--border); }
   .retro-entry:last-child { border-bottom: none; }
 
-  /* Auto-dismissing vote-result toast — see #toast-root below. */
-  #toast-root {
-    position: fixed; top: 14px; left: 0; right: 0; z-index: 60;
-    display: flex; flex-direction: column; align-items: center; gap: 8px;
-    padding: 0 16px; pointer-events: none;
+
+  /* Center-screen popup for public "dramatic moments" — a Hunter firing, a
+     Knight's duel, the Werewolf King's reveal, a badge handoff, dawn. Bigger
+     and more insistent than a toast on purpose: these are the moments
+     a real moderator would stop the table for. See #event-root below. */
+  #event-root { position: fixed; inset: 0; z-index: 70; pointer-events: none; }
+  .event-overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    padding: 24px; background: rgba(0, 0, 0, 0); pointer-events: auto;
+    transition: background 0.3s ease;
   }
-  .toast {
-    max-width: 520px; width: 100%;
-    background: var(--card); border: 1px solid var(--accent); border-radius: 14px;
-    padding: 14px 20px; box-shadow: 0 10px 28px rgba(0,0,0,0.4);
-    font-weight: 700; text-align: center; color: var(--text);
-    transform: translateY(-24px); opacity: 0;
-    transition: transform 0.35s ease, opacity 0.35s ease;
+  .event-overlay.show { background: rgba(0, 0, 0, 0.62); }
+  .event-card {
+    max-width: 420px; width: 100%; text-align: center;
+    background: linear-gradient(160deg, var(--card2), var(--card));
+    border: 2px solid var(--accent2); border-radius: 18px; padding: 26px 22px 18px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+    transform: scale(0.85); opacity: 0; transition: transform 0.3s cubic-bezier(.2,1.4,.4,1), opacity 0.25s ease;
   }
-  .toast.show { transform: translateY(0); opacity: 1; }
-  .toast.sheriff { border-color: var(--warn); }
+  .event-overlay.show .event-card { transform: scale(1); opacity: 1; }
+  .event-card.dawn, .event-card.badge, .event-card.sheriff { border-color: var(--warn); }
+  .event-card.night { border-color: var(--accent); background: linear-gradient(160deg, #2c2f70, #1b1d3f); }
+  .event-card.vote { border-color: var(--accent); }
+  .event-card.gameover { border-color: var(--good); }
+  .event-card .event-icon { font-size: 3.4rem; line-height: 1; margin-bottom: 10px; }
+  .event-card .event-title { font-size: 1.35rem; font-weight: 800; color: var(--text); margin-bottom: 8px; }
+  .event-card .event-text { font-size: 1.05rem; color: var(--text); line-height: 1.45; margin-bottom: 16px; }
+  .event-card .event-bar { height: 3px; border-radius: 3px; background: var(--accent2); transform-origin: left; margin-bottom: 12px; }
+  .event-card.dawn .event-bar, .event-card.badge .event-bar, .event-card.sheriff .event-bar { background: var(--warn); }
+  .event-card.night .event-bar, .event-card.vote .event-bar { background: var(--accent); }
+  .event-card.gameover .event-bar { background: var(--good); }
+  .event-card .event-details {
+    text-align: left; background: rgba(0,0,0,0.22); border-radius: 10px; padding: 10px 12px;
+    margin: -4px 0 14px; font-size: 0.88rem; line-height: 1.5; color: var(--text);
+  }
+  .event-card .event-details div + div { border-top: 1px solid rgba(255,255,255,0.08); padding-top: 4px; margin-top: 4px; }
+  .event-card .event-hint { font-size: 0.75rem; color: var(--muted); }
+  .paused-note { color: var(--warn); font-weight: 700; }
 </style>
 </head>
 <body>
 <div id="app"><div class="center" style="padding-top:60px;color:var(--muted)">Loading…</div></div>
 <div id="modal-root"></div>
-<div id="toast-root"></div>
+<div id="event-root"></div>
 
 <script>
 (function () {
@@ -215,7 +237,6 @@
 
   const $app = document.getElementById('app');
   const $modalRoot = document.getElementById('modal-root');
-  const $toastRoot = document.getElementById('toast-root');
   const LS_KEY = 'werewolf_session_v2';
 
   let session = loadSession();   // {roomCode, playerId, token}
@@ -316,27 +337,83 @@
     render();
   }
 
-  // --- vote-result toast (day elimination vote + Sheriff election) ---
-  // `undefined` (not null) is the "haven't looked yet" sentinel, so a page
-  // load that lands mid-game right after a real vote already resolved shows
-  // no toast for it — only a genuinely NEW event id (seen for the first time
-  // after we've already recorded a baseline) triggers one. Lives in its own
-  // #toast-root, outside #app, so render()'s full innerHTML rebuild on every
-  // poll tick can't cut an in-progress slide-in/fade-out animation short.
-  let lastVoteEventId;
-  function showVoteToast(evt) {
-    if (!$toastRoot) return;
-    const el = document.createElement('div');
-    el.className = 'toast' + (evt.kind === 'sheriff' ? ' sheriff' : '');
-    el.textContent = evt.text;
-    $toastRoot.appendChild(el);
-    // Double rAF so the initial (offscreen/transparent) state is painted
-    // before the 'show' class kicks off the CSS transition to it.
-    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
-    setTimeout(() => {
-      el.classList.remove('show');
-      setTimeout(() => el.remove(), 400);
-    }, 4200);
+  // --- public "dramatic moment" popups (view.publicEvents) ---
+  // "undefined" is the haven't-looked-yet sentinel: the first view we ever
+  // load just records a baseline, so opening/reloading the page mid-game
+  // never replays old events. After that, each new id is queued and shown
+  // one at a time — tap to dismiss, or it clears itself after a few seconds.
+  const $eventRoot = document.getElementById('event-root');
+  // How long each kind of popup stays up if nobody taps it. Night is a quick
+  // "close your eyes" beat; vote results carry the full distribution, so they
+  // get longer to read.
+  const EVENT_MS_BY_KIND = { night: 3500, vote: 10000, sheriff: 9000, gameover: 9000 };
+  const EVENT_MS_DEFAULT = 7000;
+  let lastPublicEventId;
+  const eventQueue = [];
+  let eventShowing = false;
+  function playDramaticSound() {
+    try { if (navigator.vibrate) navigator.vibrate([180, 80, 180]); } catch (e) {}
+    if (!soundOn) return;
+    const ctx = ensureAudioCtx();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') { ctx.resume().catch(() => {}); return; }
+    // A low, falling "boom" — clearly different from both the phase chime
+    // and the your-turn chime.
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.28, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.7);
+    gain.connect(ctx.destination);
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(260, now);
+    osc.frequency.exponentialRampToValueAtTime(70, now + 0.6);
+    osc.connect(gain);
+    osc.start(now);
+    osc.stop(now + 0.7);
+  }
+  function showNextEvent() {
+    if (eventShowing || !eventQueue.length || !$eventRoot) return;
+    const evt = eventQueue.shift();
+    eventShowing = true;
+    const overlay = document.createElement('div');
+    overlay.className = 'event-overlay';
+    overlay.innerHTML = `<div class="event-card ${esc(evt.kind)}" role="alertdialog" aria-live="assertive">
+      <div class="event-icon">${esc(evt.icon)}</div>
+      <div class="event-title">${esc(evt.title)}</div>
+      <div class="event-text">${esc(evt.text)}</div>
+      ${evt.details && evt.details.length ? `<div class="event-details">${evt.details.map((l) => `<div>${esc(l)}</div>`).join('')}</div>` : ''}
+      <div class="event-bar"></div>
+      <div class="event-hint">Tap anywhere to close</div>
+    </div>`;
+    $eventRoot.appendChild(overlay);
+    const bar = overlay.querySelector('.event-bar');
+    const EVENT_MS = EVENT_MS_BY_KIND[evt.kind] || EVENT_MS_DEFAULT;
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      overlay.classList.remove('show');
+      setTimeout(() => { overlay.remove(); eventShowing = false; showNextEvent(); }, 300);
+    };
+    overlay.onclick = close;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      overlay.classList.add('show');
+      if (bar && bar.animate) bar.animate([{ transform: 'scaleX(1)' }, { transform: 'scaleX(0)' }], { duration: EVENT_MS, easing: 'linear', fill: 'forwards' });
+    }));
+    if (evt.kind !== 'night') playDramaticSound();
+    setTimeout(close, EVENT_MS);
+  }
+  function handlePublicEvents(events) {
+    const list = events || [];
+    const maxId = list.reduce((m, e) => Math.max(m, e.id), 0);
+    if (lastPublicEventId === undefined) { lastPublicEventId = maxId; return; }
+    const fresh = list.filter((e) => e.id > lastPublicEventId).sort((a, b) => a.id - b.id);
+    if (maxId > lastPublicEventId) lastPublicEventId = maxId;
+    if (!fresh.length) return;
+    eventQueue.push(...fresh);
+    showNextEvent();
   }
 
   function loadSession() {
@@ -420,11 +497,10 @@
         else if (stepChanged) playChime();
         lastStepKey = newKey;
         lastMyTurn = nowMyTurn;
-        const newVoteId = view.voteResultEvent ? view.voteResultEvent.id : null;
-        if (lastVoteEventId !== undefined && newVoteId !== lastVoteEventId && view.voteResultEvent) {
-          showVoteToast(view.voteResultEvent);
-        }
-        lastVoteEventId = newVoteId;
+        // Vote results come through view.publicEvents as the big center
+        // popup (with the vote distribution), in order with every other game
+        // event — they used to be a small top toast.
+        handlePublicEvents(view.publicEvents);
       } else {
         view = null;
         clearSession();
@@ -437,6 +513,10 @@
 
   function startPolling() {
     stopPolling();
+    // A new session (create/join/rejoin, possibly a different room) gets a
+    // fresh "already seen" baseline — otherwise ids remembered from a room
+    // you just left could swallow the new room's first events.
+    lastPublicEventId = undefined;
     pollOnce().then(render);
     pollTimer = setInterval(async () => { await pollOnce(); render(); }, 900);
   }
@@ -680,7 +760,7 @@
     if (view.phase !== 'lobby') {
       // The "everyone points at once" reveal — who voted for whom, once a
       // vote is fully locked in. Deliberately shown to EVERY player (alive
-      // or not), regardless of phase, same as the toast it rides in on
+      // or not), regardless of phase, same as the popup it rides in on
       // (view.voteResultEvent) — it stays up until the next such vote
       // replaces it, since once it's public knowledge in real life it
       // doesn't un-reveal itself either.
@@ -768,7 +848,7 @@
     html += `<div class="tiny" style="margin:10px 0">Total assigned: <b>${total}</b> / ${L.playerCount} players ${totalOk ? '✅' : ''}</div>`;
     html += `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:12px">
       <input type="checkbox" id="chk-reveal" ${view.revealRoleOnDeath ? 'checked' : ''} style="width:18px;height:18px" />
-      <span>Reveal a player's role when they die</span>
+      <span>Reveal a player's role when they die <span class="tiny">(off is recommended — it keeps more of the game a mystery)</span></span>
     </label>`;
     html += '<h3>Win condition</h3>';
     html += '<div class="stack" id="wincond-choices" style="margin-bottom:14px">';
@@ -891,8 +971,19 @@
         html += `<div class="card"><div class="banner">⚖️ Tie! ${esc(tiedNames)} get one final word before the runoff vote.</div></div>`;
       }
       const dirTxt = dirArrowFor(d.direction) ? ` ${dirArrowFor(d.direction)}` : '';
-      html += `<div class="card speaker-highlight${d.isYourTurn ? ' your-turn' : ''}"><div class="tiny">${d.isYourTurn ? '🎤 YOUR TURN' : 'Now speaking'}${dirTxt}</div><div class="who">${esc(nameOf(d.currentSpeakerId))}</div><div class="countdown">${d.secondsLeft}s</div><div class="tiny" style="margin-top:6px">${d.pointer + 1} / ${d.queue.length}</div></div>`;
-      if (d.isYourTurn) html += `<div class="card"><button id="btn-finish-speech">✅ I\'m done speaking</button></div>`;
+      if (d.paused) {
+        // A duel/reveal is being resolved (last words etc.) — the speaker's
+        // clock is frozen server-side and restarts in full afterward.
+        // The speaker who was cut off may themselves have just died (e.g. the
+        // Werewolf King took them) — then the next living player picks up.
+        const cutOff = view.players.find((p) => p.id === d.currentSpeakerId);
+        html += cutOff && cutOff.alive
+          ? `<div class="card speaker-highlight"><div class="tiny paused-note">⏸️ Discussion paused</div><div class="who">${esc(cutOff.name)}</div><div class="tiny">gets a fresh turn once this is resolved</div></div>`
+          : `<div class="card speaker-highlight"><div class="tiny paused-note">⏸️ Discussion paused</div><div class="tiny">The next speaker picks up once this is resolved.</div></div>`;
+      } else {
+        html += `<div class="card speaker-highlight${d.isYourTurn ? ' your-turn' : ''}"><div class="tiny">${d.isYourTurn ? '🎤 YOUR TURN' : 'Now speaking'}${dirTxt}</div><div class="who">${esc(nameOf(d.currentSpeakerId))}</div><div class="countdown">${d.secondsLeft}s</div><div class="tiny" style="margin-top:6px">${d.pointer + 1} / ${d.queue.length}</div></div>`;
+        if (d.isYourTurn) html += `<div class="card"><button id="btn-finish-speech">✅ I\'m done speaking</button></div>`;
+      }
     }
     if (view.knightDuel && view.knightDuel.active) html += renderKnightDuelUI(view);
     if (view.wolfKingReveal && view.wolfKingReveal.active) html += renderWolfKingUI(view);
@@ -905,6 +996,9 @@
   }
 
   function renderDayVoteBody(view) {
+    if (view.dayVoteClosed) {
+      return `<div class="card center"><h2>🗳️ The votes are in</h2><p class="tiny">Waiting for the result to play out…</p></div>`;
+    }
     if (view.dayVoteBlocked) {
       return `<div class="card center"><p>🃏 You revealed yourself earlier and lost your right to vote. Watch the discussion unfold.</p></div>`;
     }
@@ -1135,7 +1229,7 @@
       : null;
     view.players.forEach((p, i) => {
       const deadClass = p.alive ? '' : ' dead';
-      const speakClass = p.id === speakingId ? ' speaking' : '';
+      const speakClass = p.id === speakingId && p.alive ? ' speaking' : '';
       const pickSide = pickIds && p.id === pickIds.left ? 'left' : pickIds && p.id === pickIds.right ? 'right' : null;
       const pickClass = pickSide ? ' pickable' : '';
       const roleTxt = p.role ? ` — ${roleIcon(p.role)} ${esc(roleLabel(p.role))}` : '';
@@ -1196,7 +1290,7 @@
     });
     if (b('btn-start')) b('btn-start').onclick = () => doAction('player/startGame', authBody());
     document.querySelectorAll('[data-remove]').forEach((el) => {
-      el.onclick = () => doAction('player/removePlayer', authBody({ playerId: el.dataset.remove }));
+      el.onclick = () => doAction('player/removePlayer', authBody({ targetId: el.dataset.remove }));
     });
 
     // Role reveal

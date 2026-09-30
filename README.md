@@ -61,6 +61,16 @@ marker never appears for or about a Hidden Wolf.
   with its own color and a distinct two-note chime (plus a short vibration on
   phones that support it) — separate from the general phase-change chime, so
   you don't have to be staring at the screen to notice it's your turn.
+- **Big moments stop the table.** When the Hunter fires, the Knight duels,
+  the Werewolf King reveals himself, the Sheriff badge changes hands, or dawn
+  breaks, every phone shows a center-screen popup (with its own low "boom"
+  sound and a buzz) saying exactly what happened and who did it. Tap to
+  close, or it clears itself after a few seconds; back-to-back moments queue
+  up one after another instead of overlapping.
+- **Discussion pauses during a duel or reveal.** While someone gives last
+  words after a Knight's duel or the Werewolf King's reveal, the current
+  speaker's clock is frozen (shown as "⏸️ Discussion paused") and they get a
+  fresh full turn afterward, instead of silently timing out underneath.
 - **A vote result toast.** The instant the day elimination vote or the
   Sheriff election resolves, a bold banner slides in announcing the outcome
   and fades out on its own a few seconds later — no need to squint at the log.
@@ -76,8 +86,8 @@ marker never appears for or about a Hidden Wolf.
   table waiting out the clock for one holdout.
 - **The Hunter and the Knight always reveal themselves the instant they act**
   (firing a shot / dueling), independent of the "reveal role on death"
-  setting — the same way the Werewolf King already did. A Hunter's target's
-  own role still only follows that setting, and a Knight's wrongly-accused
+  setting — the same way the Werewolf King already did. A Hunter's (or the
+  Werewolf King's) target's own role still only follows that setting, and a Knight's wrongly-accused
   duel target stays fully hidden (only "innocent" is proven, not their exact
   role) — only a duel that actually catches a werewolf reveals the target.
 - **Anyone who dies during the day** — executed by vote, shot by the Hunter,
@@ -209,7 +219,9 @@ else, is left entirely to the table to reason about; that ambiguity is part
 of the strategy. The two exceptions are the **Knight's duel** and the
 **Werewolf King's reveal**, which are voluntary, public, self-reveals (not
 hidden night mechanisms) — when either is used, the full outcome is
-announced in detail, including who they were and what happened.
+announced in detail: who used it, on whom, and what happened. (The person
+on the receiving end only has their role shown if they're a wolf caught by
+the Knight, or if "reveal role on death" is turned on.)
 
 ## End-of-game recap
 
@@ -274,8 +286,12 @@ defaults. All are easy to change — just say so and I'll adjust the code:
   speech turn, then everyone votes again among just them. A second tie in
   that runoff means nothing happens — no one is eliminated / there's no
   Sheriff this game — rather than a third round or a coin flip.
-- **Reveal role on death** defaults to on (a lobby toggle turns it off if
-  you'd rather keep roles secret until the game ends).
+- **Reveal role on death** defaults to **off**: a dead player's role stays
+  secret until the game ends, since knowing everyone's role as they die
+  flattens a lot of strategic play. A lobby toggle turns it on. Either way,
+  a player who publicly *uses* an ability (Hunter firing, Knight dueling,
+  Werewolf King revealing, Fool surviving a vote) outs themselves; the people
+  they hit don't.
 - The **Witch** can target herself with either potion, and can poison any
   living player (not just the wolves' victim).
 - **Wolves can vote to kill a fellow wolf** — a real, occasionally-used

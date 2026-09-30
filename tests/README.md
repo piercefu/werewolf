@@ -40,6 +40,19 @@ about game *logic* changes — only what's allowed as a minimum. `run-all.js`
 always sets it when it spawns the server; it is never set on Render, so
 production behavior is untouched.
 
+## The random full-game test (soak.test.js)
+
+`soak.test.js` plays whole games start to finish with every role in play and
+every player making random legal choices from their own screen. It fails on a
+stalled or never-ending game, on any role shown that shouldn't be (with
+"reveal role on death" off), or on the server rejecting something a player's
+screen offered. It plays 4 games by default. Before a real game night, run a
+bigger batch:
+
+```
+SOAK_GAMES=25 npm test
+```
+
 ## Adding a new test file
 
 Any `tests/*.test.js` file is picked up automatically by `run-all.js`. Use

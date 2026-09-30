@@ -202,7 +202,11 @@ function newRoom(code) {
     lobbyLeaderId: null,
     seatOrder: [], // playerId[], assigned once at game start, fixed for the game
     roleConfig: defaultRoleConfig(),
-    revealRoleOnDeath: true,
+    // Off by default: knowing each dead player's role gives away too much
+    // and flattens a lot of strategic play. Abilities that are public by
+    // nature (Hunter firing, Knight dueling, Werewolf King, Fool) still
+    // reveal the player who USED them either way.
+    revealRoleOnDeath: false,
     winConditionMode: 'majority', // 'majority' | 'extinction'
     timers: { ...DEFAULT_TIMERS },
     dayNumber: 0,
@@ -277,7 +281,58 @@ function newRoom(code) {
     // the server moves on to the next phase.
     voteResultEvent: null, // {id, kind:'day_vote'|'sheriff', text, breakdown} | null
     voteResultSeq: 0,
+
+    // --- public "dramatic moment" events (Hunter shot, Knight duel, Werewolf
+    // King reveal, badge handoff, dawn announcement) ---
+    // Same idea as voteResultEvent, but a short rolling list rather than a
+    // single slot, since two can fire back-to-back (e.g. a Hunter's shot
+    // right after they're executed). Every client shows each new id once as
+    // a center-screen popup, so an ability being used is impossible to miss
+    // instead of only showing up as a line in the log. The seq is never
+    // reset (not even between games in the same room) so a client's
+    // "last seen id" never wrongly swallows a new game's events.
+    publicEvents: [], // [{id, kind, icon, title, text, details?}]
+    publicEventSeq: 0,
   };
+}
+
+// `details` (optional) is a short list of extra lines shown under the text —
+// used for the vote distribution ("Cy — 3 votes: Ann, Bo, Dee").
+function firePublicEvent(room, kind, icon, title, text, details) {
+  room.publicEventSeq += 1;
+  room.publicEvents.push({ id: room.publicEventSeq, kind, icon, title, text, details: details && details.length ? details : undefined });
+  if (room.publicEvents.length > 10) room.publicEvents.shift();
+}
+
+// Turns a vote breakdown into compact "who voted for whom" lines, grouped by
+// target and sorted by votes (Sheriff's vote counts 1.5 in the day vote and
+// is marked 🎖️), then abstainers and no-shows.
+function voteDistributionLines(room, kind, breakdown) {
+  if (!breakdown || !breakdown.length) return [];
+  const groups = new Map(); // targetName -> {count, voters[]}
+  const abstained = [];
+  const noVote = [];
+  for (const b of breakdown) {
+    if (b.candidate) continue;
+    const isSheriff = kind === 'day_vote' && room.sheriffId === b.voterId;
+    const label = isSheriff ? `${b.voterName} 🎖️` : b.voterName;
+    if (b.targetName) {
+      const g = groups.get(b.targetName) || { count: 0, voters: [] };
+      g.count += isSheriff ? 1.5 : 1;
+      g.voters.push(label);
+      groups.set(b.targetName, g);
+    } else if (b.abstained) {
+      abstained.push(label);
+    } else {
+      noVote.push(label);
+    }
+  }
+  const lines = [...groups.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([target, g]) => `${target} — ${g.count} vote${g.count === 1 ? '' : 's'}: ${g.voters.join(', ')}`);
+  if (abstained.length) lines.push(`Abstained: ${abstained.join(', ')}`);
+  if (noVote.length) lines.push(`Didn't vote: ${noVote.join(', ')}`);
+  return lines;
 }
 
 // Records a vote outcome (day elimination or Sheriff election) as a durable,
@@ -292,6 +347,20 @@ function newRoom(code) {
 function fireVoteResultEvent(room, kind, text, breakdown) {
   room.voteResultSeq += 1;
   room.voteResultEvent = { id: room.voteResultSeq, kind, text, breakdown: breakdown || null };
+
+  // Also stop the table for it with the big center-screen popup (same stream
+  // as the Hunter/Knight/King popups, so it's ordered correctly with them —
+  // e.g. "voted out" always shows before "the Hunter fires"), including the
+  // full who-voted-for-whom distribution right in the moment.
+  const plain = text.replace(/^\S+\s+/, ''); // drop the leading 🗳️/🎖️
+  let icon; let title;
+  if (/tied again/i.test(plain)) { icon = '⚖️'; title = 'Tied again'; }
+  else if (/tied/i.test(plain)) { icon = '⚖️'; title = 'It\'s a tie!'; }
+  else if (kind === 'sheriff') { icon = '🎖️'; title = 'Sheriff election'; }
+  else if (/Fool/.test(plain)) { icon = '🃏'; title = 'Voted out… or not!'; }
+  else if (/No votes/i.test(plain)) { icon = '🗳️'; title = 'No one voted'; }
+  else { icon = '🗳️'; title = 'The village has voted'; }
+  firePublicEvent(room, kind === 'sheriff' ? 'sheriff' : 'vote', icon, title, plain, voteDistributionLines(room, kind, breakdown));
 }
 
 // Snapshot of "who voted for whom" in the day elimination vote, taken at the
@@ -445,6 +514,7 @@ function startGame(room) {
   room.log = [];
   room.guardLastProtectedId = null;
   log(room, 'The game begins. Night falls on the village.');
+  firePublicEvent(room, 'night', '🌙', 'The game begins — Night 1 falls', 'Check your role, then everyone close your eyes.');
   beginNight(room);
 }
 
@@ -491,6 +561,7 @@ function resetGame(room) {
   room.dayVotes = new Map();
   room.voteDeadline = null;
   room.dayVoteTie = null;
+  room.publicEvents = []; // seq deliberately kept — see newRoom()
 }
 
 // ---------------------------------------------------------------------------
@@ -802,10 +873,13 @@ function revealNightAndEnterAnnounce(room) {
   if (room.lastNightDeaths.length === 0) {
     room.lastAnnouncement = ['No one died during the night.'];
     log(room, 'No one died during the night.');
+    firePublicEvent(room, 'dawn', '🌅', `Day ${room.dayNumber} — dawn breaks`, 'No one died during the night.');
   } else {
     const names = room.lastNightDeaths.map((d) => getPlayer(room, d.id)?.name).filter(Boolean);
     room.lastAnnouncement = names.map((n) => `${n} died during the night.`);
     for (const n of names) log(room, `${n} died during the night.`);
+    const who = names.length === 1 ? `${names[0]} died` : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} died`;
+    firePublicEvent(room, 'dawn', '🌅', `Day ${room.dayNumber} — dawn breaks`, `${who} during the night.`);
   }
 
   // If the sitting sheriff was secretly killed last night (elected during
@@ -935,11 +1009,13 @@ function openVoting(room) {
 // Win condition
 // ---------------------------------------------------------------------------
 function checkWinCondition(room) {
+  if (room.phase === 'game_over') return true; // already decided — never announce twice
   const wolvesAlive = aliveWolfTeam(room).length;
   if (wolvesAlive === 0) {
     room.phase = 'game_over';
     room.winner = 'village';
     log(room, 'All werewolves have been eliminated. The village wins!');
+    firePublicEvent(room, 'gameover', '🏡', 'The Village wins!', 'Every werewolf has been eliminated.');
     return true;
   }
 
@@ -956,6 +1032,7 @@ function checkWinCondition(room) {
       room.winner = 'wolves';
       const which = godsWiped && villagersWiped ? 'both the Gods and the Villagers' : godsWiped ? 'all the Gods' : 'all the Villagers';
       log(room, `The werewolves have wiped out ${which}. The werewolves win!`);
+      firePublicEvent(room, 'gameover', '🐺', 'The Werewolves win!', `The werewolves have wiped out ${which}.`);
       return true;
     }
     return false;
@@ -966,6 +1043,7 @@ function checkWinCondition(room) {
     room.phase = 'game_over';
     room.winner = 'wolves';
     log(room, 'The werewolves equal or outnumber the village. The werewolves win!');
+    firePublicEvent(room, 'gameover', '🐺', 'The Werewolves win!', 'The werewolves now equal or outnumber the village.');
     return true;
   }
   return false;
@@ -1088,6 +1166,7 @@ function resolveDayVote(room) {
 function startNextNight(room) {
   room.dayNumber += 1;
   log(room, `Night ${room.dayNumber} falls.`);
+  firePublicEvent(room, 'night', '🌙', `Night ${room.dayNumber} falls`, 'Everyone close your eyes.');
   beginNight(room);
 }
 
@@ -1110,6 +1189,8 @@ function resolveHunterShot(room, hunterId, targetId) {
       const msg = `The Hunter's last shot kills ${target.name}.${roleNote}`;
       log(room, msg);
       room.lastAnnouncement = [...room.lastAnnouncement, msg];
+      firePublicEvent(room, 'hunter', '🏹', 'The Hunter fires!',
+        `${hunter ? hunter.name : 'The Hunter'} was the Hunter — their last shot takes down ${target.name}.${roleNote}`);
     }
   }
   trySettleReactive(room);
@@ -1118,17 +1199,20 @@ function resolveHunterShot(room, hunterId, targetId) {
 function resolveSheriffHandoff(room, successorId) {
   const outgoing = room.pendingSheriffHandoff.sheriffId;
   room.pendingSheriffHandoff = null;
+  const outgoingName = getPlayer(room, outgoing)?.name || 'The Sheriff';
   if (successorId) {
     const successor = getPlayer(room, successorId);
     if (successor && successor.alive) {
       room.sheriffId = successorId;
-      log(room, `${getPlayer(room, outgoing)?.name} passed the Sheriff badge to ${successor.name}.`);
+      log(room, `${outgoingName} passed the Sheriff badge to ${successor.name}.`);
+      firePublicEvent(room, 'badge', '🎖️', 'The badge changes hands', `${outgoingName} passed the Sheriff badge to ${successor.name}.`);
     } else {
       room.sheriffId = null;
     }
   } else {
     room.sheriffId = null;
     log(room, 'The Sheriff badge was discarded.');
+    firePublicEvent(room, 'badge', '🎖️', 'The badge is gone', `${outgoingName} discarded the Sheriff badge — there's no Sheriff from now on.`);
   }
   trySettleReactive(room);
 }
@@ -1190,7 +1274,12 @@ function tickOnce(room) {
     if (c.subPhase === 'vote' && now > c.voteDeadline) { concludeCampaign(room); return true; }
   }
 
-  if (room.phase === 'day_discussion' && room.discussion && room.discussion.deadline && now > room.discussion.deadline) {
+  // Not while a reactive gate is open (e.g. a Knight's duel victim giving
+  // last words mid-discussion): the current speaker's clock used to keep
+  // running underneath and could skip them — or, on the last speaker, even
+  // open the vote — while everyone was listening to someone else. The
+  // speaker's turn restarts in full once the gate clears (pruneDiscussionQueue).
+  if (room.phase === 'day_discussion' && room.discussion && room.discussion.deadline && now > room.discussion.deadline && reactiveClear(room)) {
     discussionAdvance(room);
     return true;
   }
@@ -1315,6 +1404,9 @@ function buildPlayerView(room, player) {
   if (room.voteResultEvent) {
     view.voteResultEvent = room.voteResultEvent;
   }
+  // Same reasoning — phase-independent, every player. The client pops up
+  // each new id once.
+  view.publicEvents = room.publicEvents;
 
   if (room.phase === 'night' && player.alive) {
     if (room.nightSubPhase === 'guard' && player.role === 'Guard') {
@@ -1473,6 +1565,9 @@ function buildPlayerView(room, player) {
       // execution vote — see startDayVoteRunoff(). The queue itself is
       // already narrowed to just the tied players.
       isRunoff: !!room.dayVoteTie,
+      // Frozen while a Knight duel / Werewolf King reveal is being resolved
+      // (last words, a Hunter's shot, a badge handoff) — see tickOnce.
+      paused: !reactiveClear(room),
     };
     const reactivePending = !reactiveClear(room);
     if (player.alive && !reactivePending) {
@@ -1490,7 +1585,13 @@ function buildPlayerView(room, player) {
   }
 
   if (room.phase === 'day_vote' && player.alive) {
-    if (player.canVote === false) {
+    if (!room.voteDeadline) {
+      // The vote has already been counted — the phase is only still
+      // 'day_vote' because it's paused on a reactive gate (last words, a
+      // Hunter's shot, a badge handoff). Don't keep showing live vote
+      // buttons that would just bounce with "Voting is not open."
+      view.dayVoteClosed = true;
+    } else if (player.canVote === false) {
       view.dayVoteBlocked = true;
     } else {
       // No live tally here on purpose — showing a running "who's leading"
@@ -1701,8 +1802,13 @@ const actions = {
     if (!ctx) return { ok: false, error: 'Only the lobby leader can do that.' };
     const { room } = ctx;
     if (room.phase !== 'lobby') return { ok: false, error: 'Cannot remove players mid-game.' };
-    if (body.playerId === room.lobbyLeaderId) return { ok: false, error: 'The lobby leader can\'t remove themselves.' };
-    room.players.delete(body.playerId);
+    // The player being removed comes in `targetId` — `playerId` is the
+    // leader's own identity (checked with their token above). This used to
+    // read both from `playerId`, so the Remove button could never work.
+    const targetId = body.targetId;
+    if (!targetId || !room.players.has(targetId)) return { ok: false, error: 'No such player.' };
+    if (targetId === room.lobbyLeaderId) return { ok: false, error: 'The lobby leader can\'t remove themselves.' };
+    room.players.delete(targetId);
     return { ok: true };
   },
 
@@ -1892,6 +1998,7 @@ const actions = {
     if (!ctx) return { ok: false, error: 'Not found.' };
     const { room, player } = ctx;
     if (room.phase !== 'day_discussion' || !room.discussion) return { ok: false, error: 'No discussion right now.' };
+    if (!reactiveClear(room)) return { ok: false, error: 'Discussion is paused for a moment.' };
     if (room.discussion.queue[room.discussion.pointer] !== player.id) return { ok: false, error: 'Not your turn.' };
     discussionAdvance(room);
     return { ok: true };
@@ -1930,6 +2037,8 @@ const actions = {
       const msg = `${player.name} revealed themselves as the Knight and challenged ${target.name} to a duel — they were a Werewolf and have been slain! Night falls immediately.`;
       log(room, msg);
       room.lastAnnouncement = [...room.lastAnnouncement, msg];
+      firePublicEvent(room, 'knight', '⚔️', 'Knight\'s duel!',
+        `${player.name} is the Knight and challenged ${target.name} — who was a Werewolf! ${target.name} is slain, and night falls right after their last words.`);
       // A wolf's death jumps straight to night — the rest of the discussion
       // queue and the vote are skipped entirely, so we deliberately do NOT
       // touch room.discussion here.
@@ -1941,6 +2050,8 @@ const actions = {
       const msg = `${player.name} revealed themselves as the Knight and challenged ${target.name} to a duel — but ${target.name} was innocent, and the Knight dies of shame.`;
       log(room, msg);
       room.lastAnnouncement = [...room.lastAnnouncement, msg];
+      firePublicEvent(room, 'knight', '⚔️', 'Knight\'s duel!',
+        `${player.name} is the Knight and challenged ${target.name} — who is innocent. The Knight dies of shame, and the day continues.`);
       if (!reactiveClear(room)) { room.afterReactive = 'resume_discussion'; return { ok: true }; }
       if (checkWinCondition(room)) return { ok: true };
       pruneDiscussionQueue(room);
@@ -1958,12 +2069,17 @@ const actions = {
     if (!target || !target.alive || target.id === player.id) return { ok: false, error: 'Invalid target.' };
 
     player.wolfKingUsed = true;
+    // Only the King outs himself. The player he takes down is just a death —
+    // their role follows the table's revealRoleOnDeath setting like any
+    // other, the same rule as a Hunter's target or a Knight's innocent one.
     player.publiclyRevealed = true;
-    target.publiclyRevealed = true;
     applyDeaths(room, [{ id: player.id, cause: 'wolfking_reveal' }, { id: target.id, cause: 'wolfking_reveal' }], { announceImmediately: true });
     const msg = `${player.name} revealed themselves as the Werewolf King and took ${target.name} down with them!`;
     log(room, msg);
     room.lastAnnouncement = [...room.lastAnnouncement, msg];
+    const kingTargetNote = room.revealRoleOnDeath ? ` ${target.name} was the ${ROLE_DEFS[target.role].label}.` : '';
+    firePublicEvent(room, 'wolfking', '🐺👑', 'The Werewolf King strikes!',
+      `${player.name} is the Werewolf King and takes ${target.name} down with them!${kingTargetNote}`);
 
     if (!reactiveClear(room)) { room.afterReactive = 'resume_discussion'; return { ok: true }; }
     if (checkWinCondition(room)) return { ok: true };
