@@ -93,7 +93,7 @@ async function waitText(page, text, timeout = 8000) {
     }
     ok(!!wolfPage, '[browser] identified the Werewolf\'s tab');
     await wolfPage.waitForSelector('#wolf-choices .choicebtn', { timeout: 8000 });
-    await wolfPage.click('#wolf-choices .choicebtn');
+    await wolfPage.click('#wolf-choices .choicebtn:not([data-self])');
     ok(true, '[browser] wolf cast a kill vote via the UI');
 
     await Promise.all([leader, p2, p3, p4].map((page) => waitText(page, 'Sheriff campaign', 15000)));

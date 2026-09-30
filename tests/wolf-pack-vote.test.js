@@ -1,7 +1,7 @@
 // Live wolf-pack vote visibility: wolves see each other's current picks in
 // real time, can change votes freely, and the phase only auto-advances once
 // the whole pack actually agrees on the same target.
-const { api, state, sleep, setupRoom, Tally } = require('./lib');
+const { api, state, sleep, setupRoom, pollUntil, Tally } = require('./lib');
 
 const t = new Tally();
 
@@ -58,5 +58,33 @@ const t = new Tally();
   }
   t.ok(sawAdvance, '[pack] once the pack converges on the same target (even after switching), the wolves sub-phase advances immediately');
 
+  await selfKillScenario();
   t.finish();
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// A wolf can vote to kill themselves ("self-kill"), and can target a fellow
+// wolf. With the pack agreeing on wolf A, wolf A dies overnight.
+async function selfKillScenario() {
+  const names = ['Ma', 'Ni', 'Os', 'Pe', 'Qu'];
+  const { roomCode, players } = await setupRoom(names[0], names.slice(1));
+  const L = players[names[0]];
+  await api('player/setRoleConfig', { roomCode, playerId: L.playerId, token: L.token, roleConfig: { Werewolf: 2, Villager: 3 } });
+  await api('player/setTimers', { roomCode, playerId: L.playerId, token: L.token, timers: { candidacy: 1, electionVote: 1, nightAction: 5, dayVote: 1, speech: 1 } });
+  await api('player/startGame', { roomCode, playerId: L.playerId, token: L.token });
+  const wolves = [];
+  for (const n of names) if ((await state(roomCode, players[n].playerId, players[n].token)).you.role === 'Werewolf') wolves.push(n);
+  const [a, b] = wolves;
+  const va = await state(roomCode, players[a].playerId, players[a].token);
+  const selfEntry = va.wolfPhase.candidates.find((c) => c.id === players[a].playerId);
+  t.ok(selfEntry && selfEntry.isYou === true, '[self-kill] a wolf sees THEMSELVES on the kill screen, marked as "you"', va.wolfPhase.candidates);
+  t.ok(va.wolfPhase.candidates.some((c) => c.id === players[b].playerId), '[self-kill] ...and their fellow wolf too', va.wolfPhase.candidates);
+  const r1 = await api('player/wolfVote', { roomCode, playerId: players[a].playerId, token: players[a].token, targetId: players[a].playerId });
+  t.ok(r1.ok, '[self-kill] the server accepts a wolf voting to kill themselves', r1);
+  const r2 = await api('player/wolfVote', { roomCode, playerId: players[b].playerId, token: players[b].token, targetId: players[a].playerId });
+  t.ok(r2.ok, '[self-kill] the other wolf votes to kill their teammate', r2);
+  const deadA = await pollUntil(roomCode, L, (v) => v.phase === 'day_discussion' || v.phase === 'game_over', { timeoutMs: 15000 });
+  const rowA = deadA.players.find((p) => p.name === a);
+  t.ok(rowA && rowA.alive === false, `[self-kill] the self-killed wolf (${a}) died overnight`, { phase: deadA.phase, row: rowA });
+  const dawn = (deadA.publicEvents || []).find((e) => e.kind === 'dawn');
+  t.ok(dawn && dawn.text.includes(a) && !/wolf/i.test(dawn.text), '[self-kill] the dawn popup just says they died — not how, or that they were a wolf', dawn);
+}

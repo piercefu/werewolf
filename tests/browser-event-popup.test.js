@@ -102,7 +102,7 @@ async function waitPopupLogMatch(page, pattern, timeout = 15000) {
     }
     ok(!!wolfPage, 'found the Werewolf\'s tab');
     await wolfPage.waitForSelector('#wolf-choices .choicebtn', { timeout: 8000 });
-    await wolfPage.click('#wolf-choices .choicebtn');
+    await wolfPage.click('#wolf-choices .choicebtn:not([data-self])');
 
     await waitText(leader, 'Sheriff campaign', 15000);
 

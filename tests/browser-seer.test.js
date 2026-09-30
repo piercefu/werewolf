@@ -84,7 +84,7 @@ async function waitText(page, text, timeout = 10000) {
     ok(!!seerPage && !!wolfPage, 'found the Seer and Werewolf tabs');
 
     await wolfPage.waitForSelector('#wolf-choices .choicebtn', { timeout: 8000 });
-    await wolfPage.locator('#wolf-choices .choicebtn').first().click();
+    await wolfPage.locator('#wolf-choices .choicebtn:not([data-self])').first().click();
 
     await seerPage.waitForSelector('#seer-choices .choicebtn', { timeout: 8000 });
     const targetName = (await seerPage.locator('#seer-choices .choicebtn').first().innerText()).trim();

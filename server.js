@@ -396,11 +396,16 @@ function buildCampaignVoteBreakdown(room) {
   return breakdown;
 }
 
+// Random seed for the player's pixel-art avatar (drawn client-side by
+// public/pixel-avatar.js). Purely cosmetic — never tied to role or state.
+function genAvatarSeed() { return crypto.randomBytes(6).toString('hex'); }
+
 function newPlayer(name) {
   return {
     id: genId(),
     token: genToken(),
     name,
+    avatar: genAvatarSeed(),
     role: null,
     alive: true,
     publicAlive: true, // what other players (and the player itself) are allowed to know; lags `alive` until announced
@@ -1331,6 +1336,7 @@ function playerListEntry(room, p, gameOver, viewerIsWolf, viewerId, viewerIsHidd
     isSheriff: room.sheriffId === p.id,
     canVote: p.canVote !== false,
     isLobbyLeader: room.lobbyLeaderId === p.id,
+    avatar: p.avatar,
     role: showRole ? p.role : undefined,
     isWolfTeammate: showTeammate ? true : undefined,
   };
@@ -1364,6 +1370,7 @@ function buildPlayerView(room, player) {
       viewedRole: player.viewedRole,
       canVote: player.canVote !== false,
       isLobbyLeader: room.lobbyLeaderId === player.id,
+      avatar: player.avatar,
     },
     players: publicPlayerList(room, player),
     sheriffId: room.sheriffId,
@@ -1427,14 +1434,13 @@ function buildPlayerView(room, player) {
       // all, since they have no wolfPhase view to begin with).
       view.wolfPhase = {
         active: true, secondsLeft: secondsLeft(room.nightDeadline),
-        // Wolves CAN target each other — a wolf-on-wolf kill is a real,
-        // occasionally used strategy (e.g. to cast suspicion elsewhere, or
-        // to get rid of a teammate whose play is putting the pack at risk).
-        // Only self-targeting is excluded. Note this also means a dormant
-        // Hidden Wolf can be targeted (and killed) by the other wolves —
-        // they have no way to recognize them as a teammate either.
-        candidates: alivePlayers(room).filter((p) => p.id !== player.id).map((p) => ({
-          id: p.id, name: p.name,
+        // Wolves CAN target each other — including themselves (a "self-kill",
+        // e.g. to bait the Witch's heal or look like a victim the next day) —
+        // a real strategy. Note this also means a dormant Hidden Wolf can be
+        // targeted (and killed) by the other wolves — they have no way to
+        // recognize them as a teammate either.
+        candidates: alivePlayers(room).map((p) => ({
+          id: p.id, name: p.name, isYou: p.id === player.id,
           votedBy: wolves.filter((w) => room.wolfVotes.get(w.id) === p.id).map((w) => w.name),
         })),
         yourVote: room.wolfVotes.get(player.id) || null,
@@ -1623,7 +1629,7 @@ function buildPlayerView(room, player) {
   }
 
   if (room.phase === 'game_over') {
-    view.reveal = [...room.players.values()].map((p) => ({ id: p.id, name: p.name, role: p.role, roleLabel: ROLE_DEFS[p.role]?.label, alive: p.alive }));
+    view.reveal = [...room.players.values()].map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, role: p.role, roleLabel: ROLE_DEFS[p.role]?.label, alive: p.alive }));
     // The recap replays the same curated "what happened" story everyone saw
     // live — it does not additionally unlock the secret, per-night action
     // log (who the Guard protected, who the Seer looked at, who the Witch
@@ -1797,6 +1803,15 @@ const actions = {
     resetGame(ctx.room);
     return { ok: true };
   },
+  // Re-roll your own avatar. Lobby only, so the table can learn who's who
+  // before the game and nobody's picture changes mid-game.
+  'player/shuffleAvatar': (body) => {
+    const ctx = requirePlayer(body);
+    if (!ctx) return { ok: false, error: 'Not found.' };
+    if (ctx.room.phase !== 'lobby') return { ok: false, error: 'You can only change your look in the lobby.' };
+    ctx.player.avatar = genAvatarSeed();
+    return { ok: true, avatar: ctx.player.avatar };
+  },
   'player/removePlayer': (body) => {
     const ctx = requireLeader(body);
     if (!ctx) return { ok: false, error: 'Only the lobby leader can do that.' };
@@ -1842,8 +1857,8 @@ const actions = {
     // A dormant Hidden Wolf (other wolves still alive) has no kill ability yet.
     if (!activeWolfTeam(room).some((w) => w.id === player.id)) return { ok: false, error: 'It’s not the wolves’ turn.' };
     const target = getPlayer(room, body.targetId);
-    // Wolves may target a fellow wolf — only self-targeting is blocked.
-    if (!target || !target.alive || target.id === player.id) return { ok: false, error: 'Invalid target.' };
+    // Wolves may target anyone alive — a fellow wolf, or even themselves.
+    if (!target || !target.alive) return { ok: false, error: 'Invalid target.' };
     room.wolfVotes.set(player.id, body.targetId);
     // Only fast-forward past the wolves' phase once the whole active pack has
     // voted AND currently agrees on the same target. This is what makes the

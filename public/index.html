@@ -224,12 +224,39 @@
   .event-card .event-details div + div { border-top: 1px solid rgba(255,255,255,0.08); padding-top: 4px; margin-top: 4px; }
   .event-card .event-hint { font-size: 0.75rem; color: var(--muted); }
   .paused-note { color: var(--warn); font-weight: 700; }
+
+  /* Pixel-art avatars (public/pixel-avatar.js). Purely cosmetic: they never
+     change for game reasons except going grey on a dead player's row, and
+     every piece of game information stays in the tags on the right. */
+  .av { display: inline-block; flex: 0 0 auto; border-radius: 50%; overflow: hidden; background: var(--bg2); vertical-align: middle; }
+  img.av { object-fit: cover; image-rendering: pixelated; }
+  .av-xs { width: 22px; height: 22px; }
+  .av-s { width: 30px; height: 30px; }
+  .av-m { width: 38px; height: 38px; }
+  .av-l { width: 64px; height: 64px; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
+  .av-xl { width: 96px; height: 96px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+  .choicebtn .who-line { display: flex; align-items: center; gap: 10px; }
+  .speaker-highlight .av { margin: 4px auto 0; display: block; }
+  .playerrow .left { display: flex; align-items: center; gap: 10px; min-width: 0; font-weight: 600; }
+  .playerrow .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .playerrow.dead .pname { text-decoration: line-through; }
+  .playerrow.dead .av { filter: grayscale(1); }
+  .playerrow.dead { text-decoration: none; }
+  .tags { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
+  .tag { font-size: 0.72rem; padding: 3px 8px; border-radius: 999px; background: var(--card2); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; font-weight: 600; }
+  .tag.sheriff { background: var(--warn); color: #3a2900; border-color: var(--warn); }
+  .tag.pack { background: #3b1d1d; border-color: var(--bad); color: #fca5a5; }
+  .tag.role { color: var(--text); }
+  .tag.pick { border-color: var(--warn); color: var(--warn); }
+  .tag.dead { background: transparent; }
+  .lookcard { display: flex; align-items: center; gap: 16px; }
 </style>
 </head>
 <body>
 <div id="app"><div class="center" style="padding-top:60px;color:var(--muted)">Loading…</div></div>
 <div id="modal-root"></div>
 <div id="event-root"></div>
+<script src="/pixel-avatar.js"></script>
 
 <script>
 (function () {
@@ -558,6 +585,33 @@
   function dirArrowFor(direction) {
     return direction === 'right' ? '⬇️' : direction === 'left' ? '⬆️' : '';
   }
+  // Pixel avatar for a seed, at one of the .av-* sizes. Rendered as ONE
+  // <img> per avatar (an SVG data URL, built once per seed and cached) rather
+  // than the SVG's ~150 little squares inline — the page is rebuilt on every
+  // ~1s poll, and inlining them made each rebuild noticeably slow on budget
+  // phones. The browser also caches the decoded image by URL.
+  const avatarUrlCache = new Map();
+  function avatarUrl(seed) {
+    const key = seed || 'x';
+    let url = avatarUrlCache.get(key);
+    if (!url && window.pixelAvatarSVG) {
+      url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(window.pixelAvatarSVG(key));
+      avatarUrlCache.set(key, url);
+    }
+    return url || '';
+  }
+  function avatarHTML(seed, size) {
+    const url = avatarUrl(seed);
+    return url ? `<img class="av av-${size || 's'}" src="${url}" alt="" draggable="false">` : `<span class="av av-${size || 's'}"></span>`;
+  }
+  function avatarOf(pid, size) {
+    const p = view && view.players.find((p) => p.id === pid);
+    return avatarHTML(p ? p.avatar : pid, size);
+  }
+  // Label for a pick-a-player button: avatar + name (+ optional extra html).
+  function whoLine(pid, name, extra) {
+    return `<span class="who-line">${avatarOf(pid, 's')}<span>${esc(name)}${extra || ''}</span></span>`;
+  }
   function nameOf(pid) {
     if (!view) return '?';
     const p = view.players.find((p) => p.id === pid);
@@ -733,10 +787,10 @@
     const shareUrl = location.origin + '/?room=' + view.roomCode;
     html += `
       <div class="badgebar">
-        <div><b>${esc(view.roomCode)}</b> <span class="tiny">· ${esc(view.you.name)}</span></div>
-        <div class="row" style="align-items:center">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0">${avatarHTML(view.you.avatar, 'xs')}<b>${esc(view.roomCode)}</b><span class="tiny" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">· ${esc(view.you.name)}</span></div>
+        <div class="row" style="align-items:center;flex-wrap:nowrap;gap:6px;flex:0 0 auto">
           ${view.you.isSheriff ? '<span class="pill sheriff">🎖️ Sheriff</span>' : ''}
-          ${view.you.isLobbyLeader ? '<span class="pill leader">★ Leader</span>' : ''}
+          ${view.you.isLobbyLeader ? '<span class="pill leader" title="Lobby leader">★</span>' : ''}
           <button class="icon-btn small" id="btn-sound" title="${soundOn ? 'Mute phase-change sound' : 'Unmute phase-change sound'}">${soundOn ? '🔔' : '🔕'}</button>
           <button class="icon-btn small" id="btn-rules">📖</button>
           <button class="icon-btn small" id="btn-leave" title="Leave this game">🚪</button>
@@ -813,6 +867,14 @@
         <div class="row" style="margin-top:10px;justify-content:center">
           <button class="small secondary" id="btn-copy">Copy link</button>
           <button class="small ghost" id="btn-rules-2">📖 Rules</button>
+        </div>
+      </div>
+      <div class="card lookcard">
+        ${avatarHTML(view.you.avatar, 'xl')}
+        <div style="flex:1">
+          <h3>Your look</h3>
+          <p class="tiny" style="margin-bottom:10px">Just for fun, and it has nothing to do with your role. Shuffle until you like it; it's locked in once the game starts.</p>
+          <button class="small secondary" id="btn-shuffle-avatar">🎲 Shuffle</button>
         </div>
       </div>
     `;
@@ -930,7 +992,7 @@
           : `<button id="btn-run">🎤 Run for Sheriff</button>`;
       }
     } else if (c.subPhase === 'speeches') {
-      html += `<div class="speaker-highlight${c.isYourTurn ? ' your-turn' : ''}"><div class="tiny">${c.isYourTurn ? '🎤 YOUR TURN' : 'Now speaking'}</div><div class="who">${esc(nameOf(c.currentSpeakerId))}</div><div class="countdown">${c.secondsLeft}s</div></div>`;
+      html += `<div class="speaker-highlight${c.isYourTurn ? ' your-turn' : ''}"><div class="tiny">${c.isYourTurn ? '🎤 YOUR TURN' : 'Now speaking'}</div>${avatarOf(c.currentSpeakerId, 'l')}<div class="who">${esc(nameOf(c.currentSpeakerId))}</div><div class="countdown">${c.secondsLeft}s</div></div>`;
       if (c.isYourTurn) html += `<button id="btn-campaign-done">✅ I\'m done speaking</button>`;
       html += `<p class="tiny" style="margin-top:8px">Speaking order: ${c.queue.map((id, i) => (i === c.pointer ? '<b>' : '') + esc(nameOf(id)) + (i === c.pointer ? '</b>' : '')).join(' → ')}</p>`;
     } else if (c.subPhase === 'vote') {
@@ -939,7 +1001,7 @@
         html += '<div class="stack" id="election-choices">';
         for (const cand of c.candidates) {
           const sel = c.yourVote === cand.id ? ' selected' : '';
-          html += `<button class="choicebtn${sel}" data-pid="${cand.id}">${esc(cand.name)}</button>`;
+          html += `<button class="choicebtn${sel}" data-pid="${cand.id}">${whoLine(cand.id, cand.name)}</button>`;
         }
         // Same reasoning as the day vote's abstain button: an active choice
         // that lets the vote conclude as soon as everyone has acted, instead
@@ -978,10 +1040,10 @@
         // Werewolf King took them) — then the next living player picks up.
         const cutOff = view.players.find((p) => p.id === d.currentSpeakerId);
         html += cutOff && cutOff.alive
-          ? `<div class="card speaker-highlight"><div class="tiny paused-note">⏸️ Discussion paused</div><div class="who">${esc(cutOff.name)}</div><div class="tiny">gets a fresh turn once this is resolved</div></div>`
+          ? `<div class="card speaker-highlight"><div class="tiny paused-note">⏸️ Discussion paused</div>${avatarHTML(cutOff.avatar, 'l')}<div class="who">${esc(cutOff.name)}</div><div class="tiny">gets a fresh turn once this is resolved</div></div>`
           : `<div class="card speaker-highlight"><div class="tiny paused-note">⏸️ Discussion paused</div><div class="tiny">The next speaker picks up once this is resolved.</div></div>`;
       } else {
-        html += `<div class="card speaker-highlight${d.isYourTurn ? ' your-turn' : ''}"><div class="tiny">${d.isYourTurn ? '🎤 YOUR TURN' : 'Now speaking'}${dirTxt}</div><div class="who">${esc(nameOf(d.currentSpeakerId))}</div><div class="countdown">${d.secondsLeft}s</div><div class="tiny" style="margin-top:6px">${d.pointer + 1} / ${d.queue.length}</div></div>`;
+        html += `<div class="card speaker-highlight${d.isYourTurn ? ' your-turn' : ''}"><div class="tiny">${d.isYourTurn ? '🎤 YOUR TURN' : 'Now speaking'}${dirTxt}</div>${avatarOf(d.currentSpeakerId, 'l')}<div class="who">${esc(nameOf(d.currentSpeakerId))}</div><div class="countdown">${d.secondsLeft}s</div><div class="tiny" style="margin-top:6px">${d.pointer + 1} / ${d.queue.length}</div></div>`;
         if (d.isYourTurn) html += `<div class="card"><button id="btn-finish-speech">✅ I\'m done speaking</button></div>`;
       }
     }
@@ -1011,7 +1073,7 @@
     let html = `<div class="card center"><h2 class="${winnerClass}">${winnerText}</h2></div>`;
     html += '<div class="card"><h3>Final roles</h3><div class="stack">';
     for (const p of (view.reveal || [])) {
-      html += `<div class="flex-between"><span>${p.alive ? '🙂' : '💀'} ${roleIcon(p.role)} ${esc(p.name)}</span><b>${esc(p.roleLabel)}</b></div>`;
+      html += `<div class="flex-between"><span style="display:flex;align-items:center;gap:8px">${avatarHTML(p.avatar, 's')}${p.alive ? '🙂' : '💀'} ${esc(p.name)}</span><b>${roleIcon(p.role)} ${esc(p.roleLabel)}</b></div>`;
     }
     html += '</div></div>';
     html += '<div class="card"><h3>Full recap</h3><div class="stack" style="gap:0">';
@@ -1032,7 +1094,7 @@
     }
     html += '<div class="stack" id="guard-choices">';
     for (const c of gp.candidates) {
-      html += `<button class="choicebtn" data-pid="${c.id}" ${c.disabled ? 'disabled' : ''}>${esc(c.name)}${c.disabled ? ' (protected last night)' : ''}</button>`;
+      html += `<button class="choicebtn" data-pid="${c.id}" ${c.disabled ? 'disabled' : ''}>${whoLine(c.id, c.name, c.disabled ? ' <span class="tiny">(protected last night)</span>' : '')}</button>`;
     }
     html += '</div>';
     html += `<button class="ghost" id="btn-guard-skip" style="margin-top:8px">Protect no one tonight</button>`;
@@ -1054,7 +1116,7 @@
     for (const c of wp.candidates) {
       const sel = wp.yourVote === c.id ? ' selected' : '';
       const voters = c.votedBy && c.votedBy.length ? `<div class="tiny wolfvoters">🐺 ${c.votedBy.map(esc).join(', ')}</div>` : '';
-      html += `<button class="choicebtn${sel}" data-pid="${c.id}">${esc(c.name)}${voters}</button>`;
+      html += `<button class="choicebtn${sel}" data-pid="${c.id}"${c.isYou ? ' data-self="1"' : ''}>${whoLine(c.id, c.name, c.isYou ? ' <span class="tiny">(you)</span>' : '')}${voters}</button>`;
     }
     html += '</div></div>';
     return html;
@@ -1070,7 +1132,7 @@
       html += `<p>You\'ve made your choice. Waiting on the rest of the night…</p>`;
     } else {
       html += '<div class="stack" id="seer-choices">';
-      for (const c of sp.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${esc(c.name)}</button>`;
+      for (const c of sp.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${whoLine(c.id, c.name)}</button>`;
       html += '</div>';
     }
     html += '</div>';
@@ -1095,7 +1157,7 @@
     if (wp.canPoison) {
       html += `<div class="tiny" style="margin-top:8px">☠️ Poison someone:</div>`;
       html += '<div class="stack" id="witch-poison-choices">';
-      for (const c of wp.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${esc(c.name)}</button>`;
+      for (const c of wp.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${whoLine(c.id, c.name)}</button>`;
       html += '</div>';
     }
     html += `<button class="ghost" id="btn-witch-skip">Do nothing tonight</button>`;
@@ -1105,14 +1167,14 @@
   function renderHunterShotUI(view) {
     let html = `<div class="card"><h3>🏹 Take someone with you!</h3><div class="tiny">${view.hunterShot.secondsLeft}s left</div><p>You may fire once at another player.</p>`;
     html += '<div class="stack" id="hunter-choices">';
-    for (const c of view.hunterShot.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${esc(c.name)}</button>`;
+    for (const c of view.hunterShot.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${whoLine(c.id, c.name)}</button>`;
     html += '</div></div>';
     return html;
   }
   function renderSheriffHandoffUI(view) {
     let html = `<div class="card"><h3>🎖️ You died holding the badge</h3><div class="tiny">${view.sheriffHandoff.secondsLeft}s left</div><p>Pass it to someone else, or discard it for the rest of the game.</p>`;
     html += '<div class="stack" id="handoff-choices">';
-    for (const c of view.sheriffHandoff.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${esc(c.name)}</button>`;
+    for (const c of view.sheriffHandoff.candidates) html += `<button class="choicebtn" data-pid="${c.id}">${whoLine(c.id, c.name)}</button>`;
     html += '</div>';
     html += `<button class="ghost" id="btn-handoff-discard" style="margin-top:8px">Discard the badge — no Sheriff</button>`;
     html += '</div>';
@@ -1125,7 +1187,7 @@
       html += `<div class="card"><button id="btn-finish-lastwords">✅ I\'m done</button></div>`;
       return html;
     }
-    return `<div class="card speaker-highlight"><div class="tiny">🕊️ Last words</div><div class="who">${esc(lw.speakerName)}</div><div class="countdown">${lw.secondsLeft}s</div></div>`;
+    return `<div class="card speaker-highlight"><div class="tiny">🕊️ Last words</div>${avatarOf(lw.speakerId, 'l')}<div class="who">${esc(lw.speakerName)}</div><div class="countdown">${lw.secondsLeft}s</div></div>`;
   }
   function renderSheriffDirectionUI(view) {
     const d = view.sheriffDirection;
@@ -1134,8 +1196,8 @@
       ? `<p>${d.deceasedName ? esc(d.deceasedName) + ' died' : 'Someone died'} last night. Who should speak first, right next to them?</p>`
       : `<p>You\'ll speak last. Who should start, right next to you?</p>`;
     html += '<div class="stack">';
-    if (d.leftName) html += `<button class="choicebtn" data-side="left">⬅️ ${esc(d.leftName)}</button>`;
-    if (d.rightName) html += `<button class="choicebtn" data-side="right">➡️ ${esc(d.rightName)}</button>`;
+    if (d.leftName) html += `<button class="choicebtn" data-side="left">${whoLine(d.leftId, d.leftName, " ⬅️")}</button>`;
+    if (d.rightName) html += `<button class="choicebtn" data-side="right">${whoLine(d.rightId, d.rightName, " ➡️")}</button>`;
     html += '</div></div>';
     return html;
   }
@@ -1143,7 +1205,7 @@
     let html = '<div class="card"><h3>⚔️ Knight\'s Duel (once per game)</h3>';
     html += '<p class="tiny">Reveal yourself and challenge someone, at any point during discussion. If they\'re a Werewolf, they die and night falls immediately. If they\'re innocent, you die of shame instead and the day continues.</p>';
     html += '<div class="stack" id="knight-choices">';
-    for (const c of view.knightDuel.candidates) html += `<button class="choicebtn" data-pid="${c.id}" data-name="${esc(c.name)}">${esc(c.name)}</button>`;
+    for (const c of view.knightDuel.candidates) html += `<button class="choicebtn" data-pid="${c.id}" data-name="${esc(c.name)}">${whoLine(c.id, c.name)}</button>`;
     html += '</div></div>';
     return html;
   }
@@ -1151,7 +1213,7 @@
     let html = '<div class="card"><h3>🐺👑 Reveal the King (once per game)</h3>';
     html += '<p class="tiny">Reveal yourself and choose a player to take down with you, at any point during discussion. You will both die.</p>';
     html += '<div class="stack" id="wolfking-choices">';
-    for (const c of view.wolfKingReveal.candidates) html += `<button class="choicebtn" data-pid="${c.id}" data-name="${esc(c.name)}">${esc(c.name)}</button>`;
+    for (const c of view.wolfKingReveal.candidates) html += `<button class="choicebtn" data-pid="${c.id}" data-name="${esc(c.name)}">${whoLine(c.id, c.name)}</button>`;
     html += '</div></div>';
     return html;
   }
@@ -1166,7 +1228,7 @@
     html += '<div class="stack" id="vote-choices">';
     for (const c of dv.candidates) {
       const sel = dv.yourVote === c.id ? ' selected' : '';
-      html += `<button class="choicebtn${sel}" data-pid="${c.id}">${esc(c.name)}</button>`;
+      html += `<button class="choicebtn${sel}" data-pid="${c.id}">${whoLine(c.id, c.name)}</button>`;
     }
     // Abstaining is an active choice, not just "do nothing and wait out the
     // timer" — once every eligible voter has either voted or abstained, the
@@ -1200,9 +1262,10 @@
   function renderVoteBreakdownCard(evt) {
     const title = evt.kind === 'sheriff' ? '🎖️ Election — who voted for whom' : '🗳️ Final vote — who voted for whom';
     const rows = evt.breakdown.map((b) => {
-      if (b.candidate) return `<div class="flex-between"><span>${esc(b.voterName)}</span><span class="tiny">running — no vote</span></div>`;
-      const target = b.targetName ? `→ ${esc(b.targetName)}` : `<span class="tiny">${b.abstained ? 'abstained' : 'no vote'}</span>`;
-      return `<div class="flex-between"><span>${esc(b.voterName)}</span><span>${target}</span></div>`;
+      const voter = `<span style="display:flex;align-items:center;gap:8px">${avatarOf(b.voterId, 'xs')}${esc(b.voterName)}</span>`;
+      if (b.candidate) return `<div class="flex-between">${voter}<span class="tiny">running — no vote</span></div>`;
+      const target = b.targetName ? `<span style="display:flex;align-items:center;gap:8px">→ ${avatarOf(b.targetId, 'xs')}${esc(b.targetName)}</span>` : `<span class="tiny">${b.abstained ? 'abstained' : 'no vote'}</span>`;
+      return `<div class="flex-between">${voter}${target}</div>`;
     }).join('');
     return `<div class="card"><h3>${title}</h3><div class="stack" style="gap:6px">${rows}</div></div>`;
   }
@@ -1232,19 +1295,23 @@
       const speakClass = p.id === speakingId && p.alive ? ' speaking' : '';
       const pickSide = pickIds && p.id === pickIds.left ? 'left' : pickIds && p.id === pickIds.right ? 'right' : null;
       const pickClass = pickSide ? ' pickable' : '';
-      const roleTxt = p.role ? ` — ${roleIcon(p.role)} ${esc(roleLabel(p.role))}` : '';
-      const voteTxt = p.canVote === false ? ' <span class="tiny">(no vote)</span>' : '';
-      const leaderTxt = p.isLobbyLeader ? ' ★' : '';
-      // Wolves recognize each other for the whole game, not just during their
-      // night vote — the server only sets this flag on a wolf-team viewer's
-      // own view, so this marker is invisible to everyone else.
-      const packTxt = p.isWolfTeammate ? ' <span title="Your fellow wolf">🐺</span>' : '';
-      const pickTxt = pickSide ? ` <span class="tiny">(${pickSide === 'left' ? '⬅️' : '➡️'})</span>` : '';
-      const speakDirTxt = speakClass && dirArrowFor(direction) ? ` <span class="tiny">${dirArrowFor(direction)}</span>` : '';
+      // Left side: purely cosmetic (seat, avatar, name). Right side: every
+      // piece of game information, as tags — so an avatar can never be
+      // mistaken for, or hide, anything that matters in the game.
+      const tags = [];
+      if (speakClass) tags.push(`<span class="tag">🎤 speaking${dirArrowFor(direction) ? ' ' + dirArrowFor(direction) : ''}</span>`);
+      if (pickSide) tags.push(`<span class="tag pick">${pickSide === 'left' ? '⬅️ left' : '➡️ right'}</span>`);
+      if (p.isSheriff) tags.push('<span class="tag sheriff">🎖️ Sheriff</span>');
+      // Wolves recognize each other for the whole game — the server only
+      // sets this flag on a wolf-team viewer's own view.
+      if (p.isWolfTeammate) tags.push('<span class="tag pack" title="Your fellow wolf">🐺 packmate</span>');
+      if (p.role) tags.push(`<span class="tag role">${roleIcon(p.role)} ${esc(roleLabel(p.role))}</span>`);
+      if (p.canVote === false) tags.push('<span class="tag">no vote</span>');
+      const isMe = view.you && p.id === view.you.id;
       html += `
         <div class="playerrow${deadClass}${speakClass}${pickClass}">
-          <span class="name"><span class="seatnum">${i + 1}.</span><span class="dot ${p.connected ? '' : 'off'}"></span>${esc(p.name)}${leaderTxt}${p.isSheriff ? ' 🎖️' : ''}${packTxt}${roleTxt}${voteTxt}${pickTxt}${speakDirTxt}</span>
-          ${opts.removable && view.phase === 'lobby' && !p.isLobbyLeader ? `<button class="small ghost" data-remove="${p.id}">Remove</button>` : ''}
+          <span class="left"><span class="seatnum">${i + 1}.</span>${avatarHTML(p.avatar, 'm')}<span class="pname">${esc(p.name)}${p.isLobbyLeader ? ' ★' : ''}${isMe ? ' <span class="tiny">(you)</span>' : ''}</span><span class="dot ${p.connected ? '' : 'off'}" title="${p.connected ? 'connected' : 'not connected'}"></span></span>
+          <span class="tags">${tags.join('')}${opts.removable && view.phase === 'lobby' && !p.isLobbyLeader ? `<button class="small ghost" data-remove="${p.id}">Remove</button>` : ''}</span>
         </div>
       `;
     });
@@ -1268,6 +1335,7 @@
       b('btn-copy').onclick = () => { navigator.clipboard && navigator.clipboard.writeText(location.origin + '/?room=' + view.roomCode).catch(() => {}); };
     }
     if (b('btn-rules-2')) b('btn-rules-2').onclick = openRulesModal;
+    if (b('btn-shuffle-avatar')) b('btn-shuffle-avatar').onclick = () => doAction('player/shuffleAvatar', authBody());
 
     // Lobby settings (leader only). Debounced: multiple fields can change in
     // quick succession (typing across several role-count or timer boxes),

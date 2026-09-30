@@ -157,7 +157,43 @@ async function scenarioRemovePlayer() {
   console.log('--- remove player scenario done ---');
 }
 
+// ---------------------------------------------------------------------------
+// Werewolf King's kill is immediate and final: the Witch's heal only ever
+// applies to the wolves' NIGHT target, so she can't undo it.
+// ---------------------------------------------------------------------------
+async function scenarioKingKillIsFinal() {
+  const names = ['Ki', 'Wi', 'Vo', 'Xa', 'Yu', 'Zo'];
+  const { roomCode, players } = await setupRoom(names[0], names.slice(1));
+  const leader = players[names[0]];
+  // nightAction 3s: long enough to act on the Witch's turn, short enough to keep the test quick.
+  await configureAndStart(roomCode, players, names[0], { WerewolfKing: 1, Werewolf: 1, Witch: 1, Villager: 3 }, { nightAction: 3 });
+  const roles = await rolesOf(roomCode, players, names);
+  const king = names.find((n) => roles[n] === 'WerewolfKing');
+  const witch = names.find((n) => roles[n] === 'Witch');
+  const victim = names.find((n) => roles[n] === 'Villager');
+
+  await pollUntil(roomCode, leader, (v) => v.phase === 'day_discussion', { timeoutMs: 30000 });
+  const r = await api('player/wolfKingReveal', { ...auth(roomCode, players[king]), targetId: players[victim].playerId });
+  t.ok(r.ok, '[king] the Werewolf King takes a villager down during the day', r);
+  let v = await state(roomCode, leader.playerId, leader.token);
+  t.ok(!v.players.find((p) => p.name === victim).alive, '[king] the victim is dead immediately — no waiting for night', v.players.find((p) => p.name === victim));
+
+  // Let the day finish (last words, discussion, vote) and get to the Witch's turn.
+  await api('player/finishLastWords', auth(roomCode, players[king]));
+  await api('player/finishLastWords', auth(roomCode, players[victim]));
+  const wv = await pollUntil(roomCode, players[witch], (v) => v.phase === 'night' && v.witchPhase, { timeoutMs: 40000 });
+  t.ok(!!(wv && wv.witchPhase), '[king] reached the Witch\'s turn the following night', wv && wv.phase);
+  t.ok(!wv.witchPhase.revealedVictim || wv.witchPhase.revealedVictim.name !== victim,
+    '[king] the Witch is NOT offered the King\'s victim to save (she only sees the wolves\' night target)', wv.witchPhase);
+  const heal = await api('player/witchAction', { ...auth(roomCode, players[witch]), action: 'heal' });
+  t.ok(!heal.ok, '[king] a heal attempt does nothing for the King\'s victim (nobody was attacked tonight)', heal);
+  v = await pollUntil(roomCode, leader, (v) => v.phase !== 'night', { timeoutMs: 20000 });
+  t.ok(!v.players.find((p) => p.name === victim).alive, '[king] the King\'s victim is still dead the next morning', { phase: v.phase });
+  console.log('--- wolf king kill is final scenario done ---');
+}
+
 (async () => {
+  await scenarioKingKillIsFinal();
   await scenarioRemovePlayer();
   await scenarioFool();
   await scenarioExtinctionAndReset();

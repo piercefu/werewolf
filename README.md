@@ -61,6 +61,14 @@ marker never appears for or about a Hidden Wolf.
   with its own color and a distinct two-note chime (plus a short vibration on
   phones that support it) — separate from the general phase-change chime, so
   you don't have to be staring at the screen to notice it's your turn.
+- **Pixel-art avatars.** Everyone gets a little 8-bit critter when they join
+  (lots of body shapes, eyes, mouths, hats, patterns and colors, all drawn
+  in code, so no image downloads). Tap 🎲 Shuffle in the lobby until you like
+  yours; it locks when the game starts. Avatars are purely cosmetic: they
+  never show a wolf, crown, badge, ghost or skull, and in the seating list
+  everything that matters (Sheriff, your wolf packmates, revealed roles, no
+  vote, who's speaking) sits in tags on the right, apart from the avatar.
+  A dead player's avatar just goes grey.
 - **Big moments stop the table.** When the Hunter fires, the Knight duels,
   the Werewolf King reveals himself, the Sheriff badge changes hands, or dawn
   breaks, every phone shows a center-screen popup (with its own low "boom"
@@ -296,8 +304,10 @@ defaults. All are easy to change — just say so and I'll adjust the code:
   living player (not just the wolves' victim).
 - **Wolves can vote to kill a fellow wolf** — a real, occasionally-used
   strategy (throwing suspicion elsewhere, cutting loose a packmate whose
-  play is putting the team at risk). No one — wolf included — can vote for
-  themselves, at night or during the day or Sheriff election.
+  play is putting the team at risk) — and **a wolf can vote to kill
+  themselves** (a "self-kill", e.g. to bait the Witch into using her heal, or
+  to look like an innocent victim the next morning). Voting for yourself is
+  only allowed there: never in the day vote or the Sheriff election.
 - **The wolf pack sees each other's picks live** during the kill vote — a
   running "who's voting for whom" line, plus a 🐺 tag under each candidate
   showing which packmates currently favor it — and can change their vote
